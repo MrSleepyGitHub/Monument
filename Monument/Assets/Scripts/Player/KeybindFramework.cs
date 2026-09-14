@@ -74,9 +74,6 @@ public class KeybindFramework : MonoBehaviour
 	// ==========================================
 	// 1. ACTION SETUP
 	// ==========================================
-	// ==========================================
-	// 1. ACTION SETUP
-	// ==========================================
 	private void InitializeActions()
 	{
 		movementMap = new InputActionMap("PlayerMovement");
@@ -149,7 +146,8 @@ public class KeybindFramework : MonoBehaviour
 		vehicleBrake.AddBinding("<Keyboard>/space");
 
 		vehicleBoost = movementMap.AddAction("VehicleBoost", type: InputActionType.Button);
-		vehicleBoost.AddBinding("<Keyboard>/shift");
+		vehicleBoost.AddBinding("<Keyboard>/leftShift");
+		vehicleBoost.AddBinding("<Keyboard>/rightShift");
 
 		// --- NEW: Vehicle Camera Bindings ---
 		vehicleToggleCamera = movementMap.AddAction("VehicleToggleCamera", type: InputActionType.Button);

@@ -3,17 +3,14 @@ using UnityEngine.InputSystem;
 
 public class Dragonfly : Aircraft
 {
-	[Header("Lift Origins")]
-	public Transform leftThrusterOrigin;
-	public Transform rightThrusterOrigin;
-	public Transform leftWingOrigin;
-	public Transform rightWingOrigin;
+	[Header("Lift Vectors (Local Offsets)")]
+	public Vector3 spaceThrustOrigin = new Vector3(0f, 0f, -2f);
+	public Vector3 aeroThrustOrigin = new Vector3(0f, 0f, -2f);
+	public Vector3 heliThrustOrigin = new Vector3(0f, 1f, 0f);
 
 	[Header("Stage Separation")]
 	public GameObject leftThrusterGeometry;
 	public GameObject rightThrusterGeometry;
-	public GameObject leftThrusterDebrisPrefab;
-	public GameObject rightThrusterDebrisPrefab;
 	public GameObject explosiveBoltPrefab;
 
 	[Header("Wing Animation")]
@@ -30,8 +27,8 @@ public class Dragonfly : Aircraft
 	public float cargoReelSpeed = 2f;
 	public float maxCargoSwayAngle = 15f;
 	[Range(0f, 1f)] public float cargoZWeightCompensation = 1f;
-	public float cargoAlignSpeed = 50f;   // The rotational torque applied to spin the cargo
-	public float cargoAlignDamper = 10f;  // The braking force applied to stop the spin from overshooting
+	public float cargoAlignSpeed = 50f;
+	public float cargoAlignDamper = 10f;
 
 	private bool carryingCargo = false;
 	private GameObject currentCargo;
@@ -166,30 +163,29 @@ public class Dragonfly : Aircraft
 
 	private void PerformStageSeparation()
 	{
-		DetachThruster(leftThrusterGeometry, leftThrusterOrigin, leftThrusterDebrisPrefab);
-		DetachThruster(rightThrusterGeometry, rightThrusterOrigin, rightThrusterDebrisPrefab);
+		DetachThruster(leftThrusterGeometry);
+		DetachThruster(rightThrusterGeometry);
 
 		if (wingAnimator != null) wingAnimator.SetTrigger("UnfoldWings");
 	}
 
-	private void DetachThruster(GameObject thruster, Transform origin, GameObject debrisPrefab)
+	private void DetachThruster(GameObject thruster)
 	{
-		if (thruster != null && origin != null)
+		if (thruster != null)
 		{
-			if (explosiveBoltPrefab != null) Instantiate(explosiveBoltPrefab, origin.position, origin.rotation);
+			if (explosiveBoltPrefab != null) Instantiate(explosiveBoltPrefab, thruster.transform.position, thruster.transform.rotation);
 
-			if (debrisPrefab != null)
-			{
-				GameObject debris = Instantiate(debrisPrefab, thruster.transform.position, thruster.transform.rotation);
-				Rigidbody debrisRb = debris.GetComponent<Rigidbody>();
-				if (debrisRb == null) debrisRb = debris.AddComponent<Rigidbody>();
+			thruster.transform.SetParent(null, true);
 
-				debrisRb.mass = 5f;
-				Vector3 ejectionForce = (-transform.up + -transform.forward).normalized * 10f;
-				debrisRb.AddForce(ejectionForce, ForceMode.Impulse);
-				debrisRb.AddTorque(Random.insideUnitSphere * 5f, ForceMode.Impulse);
-			}
-			thruster.SetActive(false);
+			Rigidbody debrisRb = thruster.GetComponent<Rigidbody>();
+			if (debrisRb == null) debrisRb = thruster.AddComponent<Rigidbody>();
+
+			debrisRb.mass = 5f;
+			debrisRb.linearVelocity = rb.linearVelocity;
+
+			Vector3 ejectionForce = (-transform.up + -transform.forward).normalized * 10f;
+			debrisRb.AddForce(ejectionForce, ForceMode.Impulse);
+			debrisRb.AddTorque(Random.insideUnitSphere * 5f, ForceMode.Impulse);
 		}
 	}
 
@@ -244,19 +240,14 @@ public class Dragonfly : Aircraft
 	{
 		if (carryingCargo && currentCargoRb != null && cargoPoint != null)
 		{
-			// 1. Determine if the cargo should align forward or backward to take the shortest spin
 			float alignmentDot = Vector3.Dot(currentCargo.transform.forward, cargoPoint.forward);
 			Vector3 targetForward = alignmentDot >= 0f ? cargoPoint.forward : -cargoPoint.forward;
-
-			// 2. Project both vectors onto the winch's flat plane to strictly isolate the Y-axis twist
 			Vector3 projectedForward = Vector3.ProjectOnPlane(currentCargo.transform.forward, cargoPoint.up).normalized;
 			Vector3 projectedTarget = Vector3.ProjectOnPlane(targetForward, cargoPoint.up).normalized;
 
-			// 3. Generate the rotational force
 			Vector3 alignTorque = Vector3.Cross(projectedForward, projectedTarget);
 			currentCargoRb.AddTorque(alignTorque * cargoAlignSpeed, ForceMode.Acceleration);
 
-			// 4. Apply a targeted damper strictly to the twist axis to prevent endless wobbling/overshooting
 			Vector3 twistVelocity = Vector3.Project(currentCargoRb.angularVelocity, cargoPoint.up);
 			currentCargoRb.AddTorque(-twistVelocity * cargoAlignDamper, ForceMode.Acceleration);
 		}
@@ -270,7 +261,9 @@ public class Dragonfly : Aircraft
 		rb.AddTorque(pitch + roll + yaw, ForceMode.Acceleration);
 
 		Vector3 strafe = (transform.right * currentStrafeX) + (transform.up * currentLift) + (transform.forward * currentStrafeZ);
-		rb.AddForce(strafe * spaceStrafeForce, ForceMode.Acceleration);
+		Vector3 totalThrust = strafe * spaceStrafeForce;
+
+		rb.AddForceAtPosition(totalThrust, transform.TransformPoint(spaceThrustOrigin), ForceMode.Acceleration);
 	}
 
 	private void ApplyAeroPhysics()
@@ -285,7 +278,8 @@ public class Dragonfly : Aircraft
 
 		if (forwardThrust != 0f)
 		{
-			rb.AddForce(transform.forward * (forwardThrust * aeroThrustForce), ForceMode.Acceleration);
+			Vector3 thrustForce = transform.forward * (forwardThrust * aeroThrustForce);
+			rb.AddForceAtPosition(thrustForce, transform.TransformPoint(aeroThrustOrigin), ForceMode.Acceleration);
 		}
 
 		float currentSpeed = rb.linearVelocity.magnitude;
@@ -304,11 +298,10 @@ public class Dragonfly : Aircraft
 		rb.linearVelocity = transform.TransformDirection(localVel);
 
 		Vector3 velDir = currentSpeed > 0.1f ? rb.linearVelocity.normalized : transform.forward;
-
 		float forwardAlignment = Mathf.Clamp01(Vector3.Dot(velDir, transform.forward));
 		float uprightAlignment = Mathf.Abs(Vector3.Dot(transform.up, Vector3.up));
-
 		float liftRatio = speedFactor * forwardAlignment * uprightAlignment;
+
 		rb.AddForce(-Physics.gravity * liftRatio, ForceMode.Acceleration);
 	}
 
@@ -320,10 +313,7 @@ public class Dragonfly : Aircraft
 		rb.AddTorque(pitch + roll + yaw, ForceMode.Acceleration);
 
 		Vector3 totalLift = transform.up * currentLift * heliLiftForce;
-		Vector3 halfLift = totalLift / 2f;
-
-		if (leftWingOrigin != null) rb.AddForceAtPosition(halfLift, leftWingOrigin.position, ForceMode.Acceleration);
-		if (rightWingOrigin != null) rb.AddForceAtPosition(halfLift, rightWingOrigin.position, ForceMode.Acceleration);
+		rb.AddForceAtPosition(totalLift, transform.TransformPoint(heliThrustOrigin), ForceMode.Acceleration);
 
 		Vector3 levelTorque = Vector3.Cross(transform.up, Vector3.up);
 		rb.AddTorque(levelTorque * heliLevelStrength, ForceMode.Acceleration);
