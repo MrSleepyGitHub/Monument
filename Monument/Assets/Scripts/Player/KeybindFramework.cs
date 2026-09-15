@@ -304,41 +304,59 @@ public class KeybindFramework : MonoBehaviour
 
 		actionToUnbind.Enable();
 	}
+
+	// Finds all binding indices on an action that correspond to the targeted device
+	public List<int> GetBindingIndicesForDevice(InputAction action, int targetDeviceId)
+	{
+		List<int> indices = new List<int>();
+		if (!connectedDevices.ContainsKey(targetDeviceId)) return indices;
+
+		CustomHID targetDevice = connectedDevices[targetDeviceId];
+		for (int i = 0; i < action.bindings.Count; i++)
+		{
+			var binding = action.bindings[i];
+			if (binding.isComposite) continue;
+
+			string path = binding.effectivePath ?? binding.path;
+			if (string.IsNullOrEmpty(path)) continue;
+
+			// Matches by explicit hardware path or device layout (e.g., "Keyboard", "Joystick")
+			if ((!string.IsNullOrEmpty(targetDevice.hardwarePath) && path.StartsWith(targetDevice.hardwarePath)) ||
+				(!string.IsNullOrEmpty(targetDevice.device.layout) && path.Contains(targetDevice.device.layout)))
+			{
+				indices.Add(i);
+			}
+		}
+		return indices;
+	}
 	// Unity's Input System inherently supports multiple bindings per action.
 	// This method listens for an input and forces it to ONLY save if it comes from the UI-selected device.
 	// Added System.Action callback
-	public void PerformInteractiveRebind(InputAction actionToBind, int targetDeviceId, System.Action onRebindComplete)
+	public void PerformInteractiveRebind(InputAction actionToBind, int targetDeviceId, int slotIndex, System.Action onRebindComplete)
 	{
 		if (!connectedDevices.ContainsKey(targetDeviceId)) return;
 		CustomHID targetDevice = connectedDevices[targetDeviceId];
 
 		actionToBind.Disable();
 
-		// 1. Check if a binding for this specific device layout (e.g., "Keyboard") already exists
-		int existingBindingIndex = -1;
-		for (int i = 0; i < actionToBind.bindings.Count; i++)
-		{
-			string bindingPath = actionToBind.bindings[i].effectivePath ?? actionToBind.bindings[i].path;
-
-			if (!string.IsNullOrEmpty(bindingPath) && bindingPath.Contains(targetDevice.device.layout))
-			{
-				existingBindingIndex = i;
-				break;
-			}
-		}
-
-		// 2. If it doesn't exist, manually inject a blank placeholder binding to prevent the crash
+		List<int> matchingIndices = GetBindingIndicesForDevice(actionToBind, targetDeviceId);
+		int targetBindingIndex = -1;
 		bool isNewBinding = false;
-		if (existingBindingIndex < 0)
+
+		// Overwrite existing slot if present, otherwise append a blank binding slot
+		if (slotIndex < matchingIndices.Count)
+		{
+			targetBindingIndex = matchingIndices[slotIndex];
+		}
+		else
 		{
 			actionToBind.AddBinding("");
-			existingBindingIndex = actionToBind.bindings.Count - 1;
+			targetBindingIndex = actionToBind.bindings.Count - 1;
 			isNewBinding = true;
 		}
 
-		// 3. Configure the rebinding operation using the explicit target index
 		var rebindOperation = actionToBind.PerformInteractiveRebinding()
-			.WithTargetBinding(existingBindingIndex)
+			.WithTargetBinding(targetBindingIndex)
 			.WithControlsHavingToMatchPath(targetDevice.hardwarePath)
 			.WithCancelingThrough("<Keyboard>/escape");
 
@@ -351,10 +369,9 @@ public class KeybindFramework : MonoBehaviour
 
 		rebindOperation.OnCancel(operation =>
 		{
-			// If the player presses Escape and it was a brand new bind, delete the empty placeholder
 			if (isNewBinding)
 			{
-				actionToBind.ChangeBinding(existingBindingIndex).Erase();
+				actionToBind.ChangeBinding(targetBindingIndex).Erase();
 			}
 
 			actionToBind.Enable();
@@ -363,5 +380,18 @@ public class KeybindFramework : MonoBehaviour
 		});
 
 		rebindOperation.Start();
+	}
+
+	public void RemoveBinding(InputAction actionToUnbind, int targetDeviceId, int slotIndex)
+	{
+		if (!connectedDevices.ContainsKey(targetDeviceId)) return;
+
+		List<int> matchingIndices = GetBindingIndicesForDevice(actionToUnbind, targetDeviceId);
+		if (slotIndex < matchingIndices.Count)
+		{
+			actionToUnbind.Disable();
+			actionToUnbind.ChangeBinding(matchingIndices[slotIndex]).Erase();
+			actionToUnbind.Enable();
+		}
 	}
 }

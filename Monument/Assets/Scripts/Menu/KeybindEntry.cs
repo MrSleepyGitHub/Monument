@@ -1,93 +1,73 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.InputSystem;
 using UnityEngine.EventSystems;
-using System.Collections.Generic;
 using TMPro;
 
 public class KeybindEntry : MonoBehaviour
 {
 	[Header("UI Elements")]
 	public TextMeshProUGUI actionNameText;
-	public Button bindButton;
-	public TextMeshProUGUI bindButtonText;
-	public Dropdown deviceDropdown;
+	public Button primaryButton;
+	public TextMeshProUGUI primaryButtonText;
+	public Button secondaryButton;
+	public TextMeshProUGUI secondaryButtonText;
 
 	private InputAction targetAction;
 	private KeybindFramework framework;
-	private List<int> deviceIdMap = new List<int>();
+	private System.Func<int> getSelectedDeviceId;
 
-	// Called by the Manager to set up this specific entry
-	public void Initialize(string displayName, InputAction action, KeybindFramework fw)
+	public void Initialize(string displayName, InputAction action, KeybindFramework fw, System.Func<int> deviceIdProvider)
 	{
 		actionNameText.text = displayName;
 		targetAction = action;
 		framework = fw;
+		getSelectedDeviceId = deviceIdProvider;
 
-		RefreshDropdown();
-		UpdateBindText();
+		UpdateDisplay();
 
-		// 1. Setup Left Click (Standard Unity OnClick)
-		bindButton.onClick.AddListener(StartRebind);
+		primaryButton.onClick.AddListener(() => StartRebind(0, primaryButtonText));
+		secondaryButton.onClick.AddListener(() => StartRebind(1, secondaryButtonText));
 
-		// 2. Dynamically Setup Right Click (Event Trigger)
-		SetupRightClick();
+		SetupRightClick(primaryButton, 0);
+		SetupRightClick(secondaryButton, 1);
 	}
 
-	private void RefreshDropdown()
+	private void StartRebind(int slotIndex, TextMeshProUGUI statusText)
 	{
-		deviceDropdown.ClearOptions();
-		deviceIdMap.Clear();
+		statusText.text = "...";
+		int deviceId = getSelectedDeviceId != null ? getSelectedDeviceId() : -1;
+		framework.PerformInteractiveRebind(targetAction, deviceId, slotIndex, UpdateDisplay);
+	}
 
-		List<string> options = new List<string>();
-		foreach (var kvp in framework.connectedDevices)
+	private void ClearBinding(int slotIndex)
+	{
+		int deviceId = getSelectedDeviceId != null ? getSelectedDeviceId() : -1;
+		framework.RemoveBinding(targetAction, deviceId, slotIndex);
+		UpdateDisplay();
+	}
+
+	public void UpdateDisplay()
+	{
+		int deviceId = getSelectedDeviceId != null ? getSelectedDeviceId() : -1;
+		List<int> deviceBinds = framework != null
+			? framework.GetBindingIndicesForDevice(targetAction, deviceId)
+			: new List<int>();
+
+		// Display the specific bindings assigned to the selected device
+		primaryButtonText.text = deviceBinds.Count > 0 ? targetAction.GetBindingDisplayString(deviceBinds[0]) : "---";
+		secondaryButtonText.text = deviceBinds.Count > 1 ? targetAction.GetBindingDisplayString(deviceBinds[1]) : "---";
+	}
+
+	private void SetupRightClick(Button btn, int slotIndex)
+	{
+		EventTrigger trigger = btn.gameObject.GetComponent<EventTrigger>() ?? btn.gameObject.AddComponent<EventTrigger>();
+		EventTrigger.Entry entry = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
+		entry.callback.AddListener((data) =>
 		{
-			options.Add(kvp.Value.customName);
-			deviceIdMap.Add(kvp.Key);
-		}
-		deviceDropdown.AddOptions(options);
-	}
-
-	private void StartRebind()
-	{
-		bindButtonText.text = "Waiting for input...";
-
-		int selectedDeviceId = deviceIdMap[deviceDropdown.value];
-		framework.PerformInteractiveRebind(targetAction, selectedDeviceId, UpdateBindText);
-	}
-
-	private void ClearBinding()
-	{
-		int selectedDeviceId = deviceIdMap[deviceDropdown.value];
-		framework.RemoveBinding(targetAction, selectedDeviceId);
-		UpdateBindText();
-	}
-
-	private void UpdateBindText()
-	{
-		bindButtonText.text = targetAction.GetBindingDisplayString();
-	}
-
-	private void SetupRightClick()
-	{
-		// Automatically adds an EventTrigger to the button if it doesn't have one
-		EventTrigger trigger = bindButton.gameObject.GetComponent<EventTrigger>();
-		if (trigger == null) trigger = bindButton.gameObject.AddComponent<EventTrigger>();
-
-		EventTrigger.Entry rightClickEntry = new EventTrigger.Entry
-		{
-			eventID = EventTriggerType.PointerClick
-		};
-
-		rightClickEntry.callback.AddListener((data) =>
-		{
-			PointerEventData pointerData = data as PointerEventData;
-			if (pointerData != null && pointerData.button == PointerEventData.InputButton.Right)
-			{
-				ClearBinding();
-			}
+			if (((PointerEventData)data).button == PointerEventData.InputButton.Right) ClearBinding(slotIndex);
 		});
-
-		trigger.triggers.Add(rightClickEntry);
+		trigger.triggers.Add(entry);
 	}
 }
