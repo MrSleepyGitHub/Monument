@@ -8,6 +8,7 @@ TagManager:
   - Cargo
   - Vehicle
   - Interactable
+  - LocalPlayer
   layers:
   - Default
   - TransparentFX
@@ -18,9 +19,9 @@ TagManager:
   - Interactable
   - Cargo
   - Entity
-  - 
-  - 
-  - 
+  - FPS_Arms
+  - LocalPlayer_TP
+  - Ragdoll
   - 
   - 
   - 

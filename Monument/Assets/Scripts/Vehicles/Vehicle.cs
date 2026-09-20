@@ -43,7 +43,6 @@ public abstract class Vehicle : MonoBehaviour
 	private float cameraYaw = 0f;
 	private float cameraPitch = 0f;
 
-	// Cached inputs from PlayerVehicleController
 	private float camScroll;
 	private bool camFreeLook;
 	private Vector2 camMouseLook;
@@ -60,7 +59,6 @@ public abstract class Vehicle : MonoBehaviour
 
 		vehicleColliders = GetComponentsInChildren<Collider>();
 
-		// Ensure the vehicle camera is turned off until a player boards
 		if (vehicleCamera != null)
 		{
 			vehicleCamera.gameObject.SetActive(isOccupied);
@@ -80,30 +78,25 @@ public abstract class Vehicle : MonoBehaviour
 		isFirstPerson = !isFirstPerson;
 		cameraPitch = 0f;
 		cameraYaw = 0f;
-
 		UpdateCameraRigPlacement();
 	}
 
 	public virtual void EnterVehicle(playerController player)
 	{
-		if (isOccupied) return;
+		if (isOccupied || player == null || player.CurrentMotor == null) return;
 
 		isOccupied = true;
 		currentPlayer = player;
 
-		// Mount player to seat and disable footstep/locomotion footprint
-		currentPlayer.transform.SetParent(playerSeat);
-		currentPlayer.transform.localPosition = Vector3.zero;
-		currentPlayer.transform.localRotation = Quaternion.identity;
+		humanoidMotor motor = player.CurrentMotor;
 
-		if (currentPlayer.motor != null) currentPlayer.motor.ResetLookRotation();
+		// Mount the humanoid motor entity to the seat
+		motor.transform.SetParent(playerSeat);
+		motor.transform.localPosition = Vector3.zero;
+		motor.transform.localRotation = Quaternion.identity;
+
+		motor.ResetLookRotation();
 		currentPlayer.DisableForVehicle(this);
-
-		// Switch rendering and audio listening to the vehicle rig
-		if (currentPlayer.playerCamera != null)
-		{
-			currentPlayer.playerCamera.gameObject.SetActive(false);
-		}
 
 		if (vehicleCamera != null)
 		{
@@ -119,36 +112,34 @@ public abstract class Vehicle : MonoBehaviour
 
 	public virtual void ExitVehicle()
 	{
-		if (!isOccupied) return;
+		if (!isOccupied || currentPlayer == null) return;
 
 		isOccupied = false;
 
+		humanoidMotor motor = currentPlayer.CurrentMotor;
 		Vector3 targetExitPosition = DetermineSafeExitPosition();
 
-		currentPlayer.transform.SetParent(null);
-		currentPlayer.transform.position = targetExitPosition;
-
-		Vector3 exitForward = Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
-		if (exitForward != Vector3.zero)
+		if (motor != null)
 		{
-			currentPlayer.transform.rotation = Quaternion.LookRotation(exitForward, Vector3.up);
-		}
-		else
-		{
-			currentPlayer.transform.rotation = Quaternion.Euler(0f, playerSeatExit != null ? playerSeatExit.eulerAngles.y : transform.eulerAngles.y, 0f);
+			motor.transform.SetParent(null);
+			motor.transform.position = targetExitPosition;
+
+			Vector3 exitForward = Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
+			if (exitForward != Vector3.zero)
+			{
+				motor.transform.rotation = Quaternion.LookRotation(exitForward, Vector3.up);
+			}
+			else
+			{
+				motor.transform.rotation = Quaternion.Euler(0f, playerSeatExit != null ? playerSeatExit.eulerAngles.y : transform.eulerAngles.y, 0f);
+			}
+
+			motor.ResetLookRotation();
 		}
 
-		if (currentPlayer.motor != null) currentPlayer.motor.ResetLookRotation();
-
-		// Hand rendering and audio back to the character
 		if (vehicleCamera != null)
 		{
 			vehicleCamera.gameObject.SetActive(false);
-		}
-
-		if (currentPlayer.playerCamera != null)
-		{
-			currentPlayer.playerCamera.gameObject.SetActive(true);
 		}
 
 		currentPlayer.EnableFromVehicle();
@@ -163,7 +154,6 @@ public abstract class Vehicle : MonoBehaviour
 
 	private void ApplyCameraPhysics()
 	{
-		// 1. Zoom calculation (3rd person only)
 		float scroll = camScroll;
 		if (scroll == 0f && Mouse.current != null)
 		{
@@ -176,7 +166,6 @@ public abstract class Vehicle : MonoBehaviour
 			currentZoom = Mathf.Clamp(currentZoom, minZoom, maxZoom);
 		}
 
-		// 2. Free look offsets & snap-back
 		if (camFreeLook)
 		{
 			float yawOffset = (camMouseLook.x * mouseLookSens) + (camJoystickLook.x * joystickLookSens * Time.deltaTime);
@@ -195,7 +184,6 @@ public abstract class Vehicle : MonoBehaviour
 			cameraPitch = Mathf.Lerp(cameraPitch, 0f, Time.deltaTime * snapBackSpeed);
 		}
 
-		// 3. Physical Boom / Gimbal manipulation
 		if (isFirstPerson)
 		{
 			if (cockpitCameraPoint != null)
@@ -212,7 +200,6 @@ public abstract class Vehicle : MonoBehaviour
 		{
 			if (cameraBoom != null)
 			{
-				// Boom handles pitch and yaw
 				cameraBoom.localRotation = Quaternion.Euler(defaultThirdPersonPitch + cameraPitch, defaultThirdPersonYaw + cameraYaw, 0f);
 
 				if (vehicleCamera.transform.parent != cameraBoom)
@@ -221,7 +208,6 @@ public abstract class Vehicle : MonoBehaviour
 					vehicleCamera.transform.localRotation = Quaternion.identity;
 				}
 
-				// Camera moves strictly backward along the boom's local Z axis
 				vehicleCamera.transform.localPosition = new Vector3(0f, 0f, -currentZoom);
 			}
 		}
@@ -245,18 +231,17 @@ public abstract class Vehicle : MonoBehaviour
 		}
 	}
 
-	// --- EXIT POSITION CALCULATION ---
 	private Vector3 DetermineSafeExitPosition()
 	{
 		float radius = exitClearanceRadius;
 		float height = exitClearanceHeight;
 		LayerMask mask = exitObstacleMask;
 
-		if (currentPlayer != null && currentPlayer.motor != null && currentPlayer.motor.playerCollider != null)
+		if (currentPlayer != null && currentPlayer.CurrentMotor != null && currentPlayer.CurrentMotor.playerCollider != null)
 		{
-			radius = currentPlayer.motor.playerCollider.radius * 0.95f;
-			height = currentPlayer.motor.standingHeight;
-			mask = currentPlayer.motor.groundMask;
+			radius = currentPlayer.CurrentMotor.playerCollider.radius * 0.95f;
+			height = currentPlayer.CurrentMotor.standingHeight;
+			mask = currentPlayer.CurrentMotor.groundMask;
 		}
 
 		Vector3 primaryExit = playerSeatExit != null ? playerSeatExit.position : transform.position + transform.right * 2f;
@@ -269,9 +254,6 @@ public abstract class Vehicle : MonoBehaviour
 		Vector3 topOfVehicle = transform.position + Vector3.up * (height * 0.8f);
 		if (IsPointUnobstructed(topOfVehicle, radius, height, mask)) return topOfVehicle;
 
-		Vector3 rearPoint = transform.position - transform.forward * 3f + Vector3.up * 0.5f;
-		if (IsPointUnobstructed(rearPoint, radius, height, mask)) return rearPoint;
-
 		return transform.position + Vector3.up * 1.5f;
 	}
 
@@ -281,7 +263,6 @@ public abstract class Vehicle : MonoBehaviour
 		Vector3 p1 = origin + Vector3.up * (height - radius);
 
 		Collider[] hits = Physics.OverlapCapsule(p0, p1, radius, mask, QueryTriggerInteraction.Ignore);
-
 		foreach (Collider hit in hits)
 		{
 			bool isOwnCollider = false;
@@ -296,10 +277,8 @@ public abstract class Vehicle : MonoBehaviour
 					}
 				}
 			}
-
 			if (!isOwnCollider) return false;
 		}
-
 		return true;
 	}
 }

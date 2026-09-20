@@ -1,19 +1,16 @@
 using UnityEngine;
 using UnityEngine.AI;
 
-[RequireComponent(typeof(humanoidMotor))]
-[RequireComponent(typeof(NavMeshAgent))]
 public class BotController : MonoBehaviour
 {
 	public enum BotState { Idle, Seek, Defend, Attack }
 
-	[Header("Team Setup")]
-	public int teamId = 1;
+	[Header("Possession Authority")]
+	[SerializeField] private humanoidMotor currentMotor;
+	public humanoidMotor CurrentMotor => currentMotor;
 
-	[Header("Starter Weapon")]
-	public GameObject starterWeaponPrefab;
-	public Transform weaponHolder;
-	public Weapon currentWeapon;
+	[Header("Team & Identity")]
+	public int teamId = 2;
 
 	[Header("Personality Traits (0 - 1)")]
 	[Range(0f, 1f)] public float aggression = 0.6f;
@@ -27,10 +24,13 @@ public class BotController : MonoBehaviour
 	public LayerMask targetMask;
 	public LayerMask obstructionMask;
 
-	[Header("Combat & Engagement")]
+	[Header("Combat & Tactical Motion")]
 	public float minAttackDistance = 5f;
 	public float maxAttackDistance = 20f;
 	public float rotationSpeed = 8f;
+	public float repositionRadius = 6f;
+	public float repositionIntervalMin = 2.5f;
+	public float repositionIntervalMax = 5.0f;
 
 	[Header("Burst Firing")]
 	public float burstDurationMin = 0.25f;
@@ -38,19 +38,11 @@ public class BotController : MonoBehaviour
 	public float burstCooldownMin = 0.4f;
 	public float burstCooldownMax = 1.1f;
 
-	[Header("Repositioning")]
-	public float repositionIntervalMin = 2.5f;
-	public float repositionIntervalMax = 5.0f;
-	public float repositionRadius = 6f;
-
 	[Header("Current State (Read-Only)")]
 	[SerializeField] private BotState currentState = BotState.Idle;
 	[SerializeField] private Transform currentTarget;
 
-	private humanoidMotor motor;
 	private NavMeshAgent agent;
-	private Health health;
-	private TeamMember teamMember;
 
 	private Vector3 lastKnownTargetPos;
 	private float memoryTimer = 0f;
@@ -58,74 +50,82 @@ public class BotController : MonoBehaviour
 	private float idlePatrolTimer = 0f;
 	private Vector3 idleDestination;
 
-	// Burst firing internal tracking
 	private float burstTimer = 0f;
 	private float burstCooldownTimer = 0f;
 	private bool isFiringBurst = false;
 
-	// Reposition internal tracking
 	private float repositionTimer = 0f;
 	private Vector3 repositionDestination;
 	private bool isRepositioning = false;
 
-	private void Awake()
+	public void Possess(humanoidMotor newMotor)
 	{
-		motor = GetComponent<humanoidMotor>();
-		agent = GetComponent<NavMeshAgent>();
-		health = GetComponent<Health>();
-		teamMember = GetComponent<TeamMember>();
+		if (currentMotor != null)
+		{
+			UnpossessCurrent();
+		}
 
-		if (teamMember != null) teamId = teamMember.teamId;
+		currentMotor = newMotor;
+		if (currentMotor == null) return;
 
+		agent = currentMotor.GetComponent<NavMeshAgent>();
+		if (agent == null)
+		{
+			agent = currentMotor.gameObject.AddComponent<NavMeshAgent>();
+		}
+
+		agent.enabled = true;
 		agent.updatePosition = false;
 		agent.updateRotation = false;
 
-		if (motor != null && motor.cameraHolder != null)
-		{
-			Camera botCam = motor.cameraHolder.GetComponentInChildren<Camera>();
-			if (botCam != null) botCam.enabled = false;
+		currentMotor.OnDeath.AddListener(OnMotorDied);
+		currentMotor.teamId = teamId;
 
-			AudioListener listener = motor.cameraHolder.GetComponentInChildren<AudioListener>();
-			if (listener != null) listener.enabled = false;
-		}
-	}
-
-	private void Start()
-	{
-		SpawnStarterWeapon();
+		currentMotor.Possess(this);
 		repositionTimer = Random.Range(repositionIntervalMin, repositionIntervalMax);
 	}
 
-	private void SpawnStarterWeapon()
+	public void UnpossessCurrent()
 	{
-		if (starterWeaponPrefab == null || weaponHolder == null) return;
-
-		GameObject weaponInstance = Instantiate(starterWeaponPrefab, weaponHolder);
-		weaponInstance.transform.localPosition = Vector3.zero;
-		weaponInstance.transform.localRotation = Quaternion.identity;
-
-		currentWeapon = weaponInstance.GetComponent<Weapon>();
-
-		if (currentWeapon != null)
+		if (currentMotor != null)
 		{
-			Rigidbody wRb = weaponInstance.GetComponent<Rigidbody>();
-			if (wRb != null) wRb.isKinematic = true;
+			currentMotor.OnDeath.RemoveListener(OnMotorDied);
+			if (agent != null) agent.enabled = false;
 
-			Collider wCol = weaponInstance.GetComponent<Collider>();
-			if (wCol != null) wCol.enabled = false;
+			currentMotor.Unpossess();
+			currentMotor = null;
+		}
 
-			AnimatorHumanoid anim = GetComponent<AnimatorHumanoid>();
-			if (anim != null)
-			{
-				anim.leftHandGrip = currentWeapon.leftHandGrip;
-				currentWeapon.aimTarget = anim.playerAim;
-			}
+		agent = null;
+		currentTarget = null;
+	}
+
+	public bool IsControllingAliveEntity()
+	{
+		if (currentMotor == null) return false;
+		if (currentMotor.isDead || currentMotor.currentHealth <= 0f) return false;
+		if (!currentMotor.enabled && !currentMotor.inVehicle) return false;
+		return true;
+	}
+
+	private void OnMotorDied()
+	{
+		if (currentMotor != null && currentMotor.currentWeapon != null)
+		{
+			currentMotor.currentWeapon.ProcessInput(false, false);
+		}
+
+		if (agent != null)
+		{
+			agent.enabled = false;
 		}
 	}
 
 	private void Update()
 	{
-		agent.nextPosition = transform.position;
+		if (!IsControllingAliveEntity()) return;
+
+		agent.nextPosition = currentMotor.transform.position;
 
 		ScanForTargets();
 		EvaluateStateTransitions();
@@ -134,38 +134,53 @@ public class BotController : MonoBehaviour
 
 	private void ScanForTargets()
 	{
-		Collider[] hits = Physics.OverlapSphere(transform.position, visionRange, targetMask);
+		Collider[] hits = Physics.OverlapSphere(currentMotor.transform.position, visionRange, targetMask);
 		Transform bestTarget = null;
 		float closestDist = Mathf.Infinity;
 
-		foreach (Collider hit in hits)
+		for (int i = 0; i < hits.Length; i++)
 		{
-			if (hit.transform == this.transform || hit.transform.IsChildOf(this.transform)) continue;
+			Collider hit = hits[i];
+			if (hit.transform == currentMotor.transform || hit.transform.IsChildOf(currentMotor.transform)) continue;
 
-			Health targetHealth = hit.GetComponentInParent<Health>();
-			if (targetHealth == null || targetHealth.currentHealth <= 0f) continue;
+			humanoidMotor targetMotor = hit.GetComponentInParent<humanoidMotor>();
+			if (targetMotor == null || targetMotor.isDead || targetMotor.currentHealth <= 0f) continue;
 
-			TeamMember targetTeam = hit.GetComponentInParent<TeamMember>();
-			if (targetTeam != null && (targetTeam.teamId == this.teamId || targetTeam.teamId == 0))
+			if (targetMotor.teamId == this.teamId || targetMotor.teamId == 0)
 			{
 				continue;
 			}
 
-			Vector3 eyeOrigin = motor.cameraHolder != null ? motor.cameraHolder.position : transform.position + Vector3.up * 1.5f;
+			Vector3 eyeOrigin = currentMotor.camHolder != null ? currentMotor.camHolder.position : currentMotor.transform.position + Vector3.up * 1.5f;
 			Vector3 targetCenter = hit.bounds.center;
 			Vector3 dirToTarget = (targetCenter - eyeOrigin).normalized;
 
-			Transform forwardRef = motor.bodyGeometry != null ? motor.bodyGeometry : transform;
+			Transform forwardRef = currentMotor.bodyGeometry != null ? currentMotor.bodyGeometry : currentMotor.transform;
 			if (Vector3.Angle(forwardRef.forward, dirToTarget) < visionAngle * 0.5f)
 			{
 				float dist = Vector3.Distance(eyeOrigin, targetCenter);
 
-				if (!Physics.Raycast(eyeOrigin, dirToTarget, dist, obstructionMask))
+				// Verify line-of-sight without getting blocked by bot's own hitboxes
+				RaycastHit[] obsHits = Physics.RaycastAll(eyeOrigin, dirToTarget, dist, obstructionMask, QueryTriggerInteraction.Ignore);
+				bool isObstructed = false;
+
+				for (int j = 0; j < obsHits.Length; j++)
+				{
+					if (obsHits[j].transform == currentMotor.transform || obsHits[j].transform.IsChildOf(currentMotor.transform))
+						continue;
+					if (obsHits[j].transform == hit.transform || obsHits[j].transform.IsChildOf(hit.transform))
+						continue;
+
+					isObstructed = true;
+					break;
+				}
+
+				if (!isObstructed)
 				{
 					if (dist < closestDist)
 					{
 						closestDist = dist;
-						bestTarget = targetHealth.transform;
+						bestTarget = targetMotor.transform;
 					}
 				}
 			}
@@ -186,8 +201,10 @@ public class BotController : MonoBehaviour
 
 	public void HearNoise(Vector3 soundOrigin, float loudnessRadius)
 	{
+		if (currentMotor == null) return;
+
 		float effectiveHearing = hearingRange * (0.5f + attention * 0.5f);
-		if (Vector3.Distance(transform.position, soundOrigin) <= (effectiveHearing + loudnessRadius))
+		if (Vector3.Distance(currentMotor.transform.position, soundOrigin) <= (effectiveHearing + loudnessRadius))
 		{
 			lastKnownTargetPos = soundOrigin;
 			memoryTimer = baseMemoryDuration * (0.5f + attention);
@@ -203,20 +220,19 @@ public class BotController : MonoBehaviour
 	{
 		if (currentTarget != null)
 		{
-			Health targetHealth = currentTarget.GetComponentInParent<Health>();
-			TeamMember targetTeam = currentTarget.GetComponentInParent<TeamMember>();
+			humanoidMotor targetMotor = currentTarget.GetComponentInParent<humanoidMotor>();
 
-			if (targetHealth == null || targetHealth.currentHealth <= 0f ||
-			   (targetTeam != null && (targetTeam.teamId == this.teamId || targetTeam.teamId == 0)))
+			if (targetMotor == null || targetMotor.isDead || targetMotor.currentHealth <= 0f ||
+			   (targetMotor.teamId == this.teamId || targetMotor.teamId == 0))
 			{
 				currentTarget = null;
 				isRepositioning = false;
 			}
 		}
 
-		if (health != null && health.maxHealth > 0f)
+		if (currentMotor != null && currentMotor.maxHealth > 0f)
 		{
-			float healthRatio = health.currentHealth / health.maxHealth;
+			float healthRatio = currentMotor.currentHealth / currentMotor.maxHealth;
 			if (healthRatio <= fear && currentTarget != null)
 			{
 				currentState = BotState.Defend;
@@ -260,14 +276,14 @@ public class BotController : MonoBehaviour
 
 	private void ExecuteIdle()
 	{
-		motor.SetSprintInput(false);
+		currentMotor.SetSprintInput(false);
 		HandleBurstFiring(false, false);
 		idlePatrolTimer -= Time.deltaTime;
 
 		if (idlePatrolTimer <= 0f)
 		{
 			idlePatrolTimer = Random.Range(3f, 7f) / Mathf.Max(0.1f, attention);
-			Vector3 randomPoint = transform.position + Random.insideUnitSphere * 8f;
+			Vector3 randomPoint = currentMotor.transform.position + Random.insideUnitSphere * 8f;
 			if (NavMesh.SamplePosition(randomPoint, out NavMeshHit hit, 8f, NavMesh.AllAreas))
 			{
 				idleDestination = hit.position;
@@ -280,10 +296,9 @@ public class BotController : MonoBehaviour
 	private void ExecuteSeek()
 	{
 		HandleBurstFiring(false, false);
-		motor.SetSprintInput(aggression > 0.5f);
+		currentMotor.SetSprintInput(aggression > 0.5f);
 
-		// Reposition/sweep search points when arriving near the target's last known location
-		if (Vector3.Distance(transform.position, lastKnownTargetPos) <= 3f)
+		if (Vector3.Distance(currentMotor.transform.position, lastKnownTargetPos) <= 3f)
 		{
 			repositionTimer -= Time.deltaTime;
 			if (repositionTimer <= 0f || !isRepositioning)
@@ -313,10 +328,9 @@ public class BotController : MonoBehaviour
 	{
 		if (currentTarget == null) return;
 
-		float dist = Vector3.Distance(transform.position, currentTarget.position);
+		float dist = Vector3.Distance(currentMotor.transform.position, currentTarget.position);
 		float optimalDist = Mathf.Lerp(maxAttackDistance, minAttackDistance, aggression);
 
-		// --- Tactical Repositioning Cycle ---
 		repositionTimer -= Time.deltaTime;
 		if (repositionTimer <= 0f)
 		{
@@ -327,29 +341,27 @@ public class BotController : MonoBehaviour
 		if (isRepositioning)
 		{
 			MoveToward(repositionDestination, 1.2f);
-			if (Vector3.Distance(transform.position, repositionDestination) <= 1.5f)
+			if (Vector3.Distance(currentMotor.transform.position, repositionDestination) <= 1.5f)
 			{
 				isRepositioning = false;
 			}
 		}
 		else if (dist > optimalDist)
 		{
-			motor.SetSprintInput(dist > optimalDist * 1.5f && aggression > 0.4f);
+			currentMotor.SetSprintInput(dist > optimalDist * 1.5f && aggression > 0.4f);
 			MoveToward(currentTarget.position, optimalDist * 0.8f);
 		}
 		else
 		{
-			motor.SetMoveInput(Vector2.zero);
-			motor.SetSprintInput(false);
+			currentMotor.SetMoveInput(Vector2.zero);
+			currentMotor.SetSprintInput(false);
 		}
 
-		// Aim alignment
 		RotateToward(currentTarget.position);
 		AlignVerticalPitch(currentTarget.position + Vector3.up * 1.3f);
 
-		// Burst firing execution
-		Transform forwardRef = motor.bodyGeometry != null ? motor.bodyGeometry : transform;
-		Vector3 dirToTarget = (currentTarget.position - transform.position).normalized;
+		Transform forwardRef = currentMotor.bodyGeometry != null ? currentMotor.bodyGeometry : currentMotor.transform;
+		Vector3 dirToTarget = (currentTarget.position - currentMotor.transform.position).normalized;
 		bool onTarget = Vector3.Dot(forwardRef.forward, dirToTarget) > 0.82f;
 
 		HandleBurstFiring(true, onTarget);
@@ -357,12 +369,12 @@ public class BotController : MonoBehaviour
 
 	private void ExecuteDefend()
 	{
-		motor.SetSprintInput(true);
+		currentMotor.SetSprintInput(true);
 
 		if (currentTarget != null)
 		{
-			Vector3 retreatDir = (transform.position - currentTarget.position).normalized;
-			Vector3 candidatePos = transform.position + retreatDir * 12f;
+			Vector3 retreatDir = (currentMotor.transform.position - currentTarget.position).normalized;
+			Vector3 candidatePos = currentMotor.transform.position + retreatDir * 12f;
 
 			if (NavMesh.SamplePosition(candidatePos, out NavMeshHit hit, 10f, NavMesh.AllAreas))
 			{
@@ -382,14 +394,13 @@ public class BotController : MonoBehaviour
 		}
 	}
 
-	// --- BURST FIRING LOGIC ---
 	private void HandleBurstFiring(bool wantsToShoot, bool onTarget)
 	{
-		if (currentWeapon == null) return;
+		if (currentMotor.currentWeapon == null) return;
 
 		if (!wantsToShoot || !onTarget)
 		{
-			currentWeapon.ProcessInput(false, false);
+			currentMotor.currentWeapon.ProcessInput(false, false);
 			isFiringBurst = false;
 			return;
 		}
@@ -397,19 +408,19 @@ public class BotController : MonoBehaviour
 		if (isFiringBurst)
 		{
 			burstTimer -= Time.deltaTime;
-			currentWeapon.ProcessInput(true, true);
+			currentMotor.currentWeapon.ProcessInput(true, true);
 
 			if (burstTimer <= 0f)
 			{
 				isFiringBurst = false;
 				burstCooldownTimer = Random.Range(burstCooldownMin, burstCooldownMax) / Mathf.Max(0.2f, aggression);
-				currentWeapon.ProcessInput(false, false);
+				currentMotor.currentWeapon.ProcessInput(false, false);
 			}
 		}
 		else
 		{
 			burstCooldownTimer -= Time.deltaTime;
-			currentWeapon.ProcessInput(false, false);
+			currentMotor.currentWeapon.ProcessInput(false, false);
 
 			if (burstCooldownTimer <= 0f)
 			{
@@ -419,16 +430,13 @@ public class BotController : MonoBehaviour
 		}
 	}
 
-	// --- TACTICAL FLANKING / REPOSITIONING ---
 	private void PickAttackRepositionPoint()
 	{
 		if (currentTarget == null) return;
 
-		Vector3 toTarget = (currentTarget.position - transform.position).normalized;
-
-		// Strafe perpendicular to the target (flanking left or right) with slight depth shifts
+		Vector3 toTarget = (currentTarget.position - currentMotor.transform.position).normalized;
 		Vector3 strafeDir = Vector3.Cross(toTarget, Vector3.up) * (Random.value > 0.5f ? 1f : -1f);
-		Vector3 candidatePos = transform.position + (strafeDir * Random.Range(3f, repositionRadius)) + (toTarget * Random.Range(-2f, 2.5f));
+		Vector3 candidatePos = currentMotor.transform.position + (strafeDir * Random.Range(3f, repositionRadius)) + (toTarget * Random.Range(-2f, 2.5f));
 
 		if (NavMesh.SamplePosition(candidatePos, out NavMeshHit hit, repositionRadius, NavMesh.AllAreas))
 		{
@@ -439,20 +447,22 @@ public class BotController : MonoBehaviour
 
 	private void AlignVerticalPitch(Vector3 targetPoint)
 	{
-		if (motor.cameraHolder == null) return;
+		if (currentMotor.camGimbal == null) return;
 
-		Vector3 eyePos = motor.cameraHolder.position;
+		Vector3 eyePos = currentMotor.camGimbal.position;
 		Vector3 aimDir = (targetPoint - eyePos).normalized;
 
-		Transform refTransform = motor.bodyGeometry != null ? motor.bodyGeometry : transform;
+		Transform refTransform = currentMotor.bodyGeometry != null ? currentMotor.bodyGeometry : currentMotor.transform;
 		Vector3 localAim = refTransform.InverseTransformDirection(aimDir);
-		float pitchAngle = -Mathf.Atan2(localAim.y, Mathf.Sqrt(localAim.x * localAim.x + localAim.z * localAim.z)) * Mathf.Rad2Deg;
 
-		float currentPitch = motor.cameraHolder.localEulerAngles.x;
-		if (currentPitch > 180f) currentPitch -= 360f;
-
-		float pitchDelta = Mathf.DeltaAngle(currentPitch, pitchAngle);
-		motor.RotateCamera(pitchDelta * rotationSpeed * Time.deltaTime);
+		float flatDist = Mathf.Sqrt(localAim.x * localAim.x + localAim.z * localAim.z);
+		if (flatDist > 0.001f)
+		{
+			float desiredPitch = -Mathf.Atan2(localAim.y, flatDist) * Mathf.Rad2Deg;
+			float currentPitch = currentMotor.CurrentPitch;
+			float pitchDelta = Mathf.DeltaAngle(currentPitch, desiredPitch);
+			currentMotor.RotateCamera(pitchDelta * rotationSpeed * Time.deltaTime);
+		}
 	}
 
 	private void MoveToward(Vector3 destination, float stopDistance)
@@ -462,27 +472,27 @@ public class BotController : MonoBehaviour
 
 		if (agent.remainingDistance > agent.stoppingDistance)
 		{
-			Transform refTransform = motor.bodyGeometry != null ? motor.bodyGeometry : transform;
+			Transform refTransform = currentMotor.bodyGeometry != null ? currentMotor.bodyGeometry : currentMotor.transform;
 			Vector3 localDesired = refTransform.InverseTransformDirection(agent.desiredVelocity).normalized;
-			motor.SetMoveInput(new Vector2(localDesired.x, localDesired.z));
+			currentMotor.SetMoveInput(new Vector2(localDesired.x, localDesired.z));
 
 			bool isFocusingTarget = (currentState == BotState.Attack) ||
 								   (currentState == BotState.Defend && aggression > 0.4f && currentTarget != null);
 
 			if (!isFocusingTarget && agent.desiredVelocity.sqrMagnitude > 0.1f)
 			{
-				RotateToward(transform.position + agent.desiredVelocity);
+				RotateToward(currentMotor.transform.position + agent.desiredVelocity);
 			}
 		}
 		else
 		{
-			motor.SetMoveInput(Vector2.zero);
+			currentMotor.SetMoveInput(Vector2.zero);
 		}
 	}
 
 	private void RotateToward(Vector3 targetWorldPosition)
 	{
-		Transform refTransform = motor.bodyGeometry != null ? motor.bodyGeometry : transform;
+		Transform refTransform = currentMotor.bodyGeometry != null ? currentMotor.bodyGeometry : currentMotor.transform;
 
 		Vector3 flatDir = Vector3.ProjectOnPlane(targetWorldPosition - refTransform.position, Vector3.up).normalized;
 		if (flatDir.sqrMagnitude > 0.001f)
@@ -494,7 +504,7 @@ public class BotController : MonoBehaviour
 			{
 				float maxStep = rotationSpeed * 50f * Time.deltaTime;
 				float step = Mathf.Clamp(yAngleDelta, -maxStep, maxStep);
-				motor.Rotate(new Vector3(0f, step, 0f));
+				currentMotor.Rotate(new Vector3(0f, step, 0f));
 			}
 		}
 	}

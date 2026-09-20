@@ -1,3 +1,6 @@
+///////////////////////////
+// MENU MANAGER
+///////////////////////////
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -5,31 +8,43 @@ using UnityEngine.InputSystem;
 
 public class MenuManager : MonoBehaviour
 {
-	[Header("Menu List")]
-	public GameObject baseMainMenu;
-	public GameObject profileMenu;
-	public GameObject optionsMenu;
+	public static MenuManager Instance { get; private set; }
 
-	// Inside options menu
-	public GameObject audioMenu;
-	public GameObject videoMenu;
-	public GameObject controlsMenu;
-	public GameObject keybindMenu;
+	[Header("Root Menu References")]
+	[Tooltip("The root UI panel for the Main Menu scene.")]
+	public GameObject mainMenuRoot;
+	[Tooltip("The root Pause Menu canvas/panel during gameplay.")]
+	public GameObject pauseMenuRoot;
 
-	[Header("Pause Settings")]
-	public GameObject pauseMenu;
-	public MonoBehaviour playerController;
+	[Header("Scene Configuration")]
+	[SerializeField] private int mainMenuSceneIndex = 0;
 
-	private bool isPaused = false;
-	private int mainMenuSceneIndex = 0;
+	private readonly Stack<GameObject> menuStack = new Stack<GameObject>();
+	public bool IsGameplayScene => SceneManager.GetActiveScene().buildIndex != mainMenuSceneIndex;
 
-	private Stack<GameObject> menuStack = new Stack<GameObject>();
+	private void Awake()
+	{
+		if (Instance != null && Instance != this)
+		{
+			Destroy(gameObject);
+			return;
+		}
+		Instance = this;
+	}
 
 	private void Start()
 	{
-		if (SceneManager.GetActiveScene().buildIndex == mainMenuSceneIndex && baseMainMenu != null)
+		if (!IsGameplayScene)
 		{
-			OpenMenu(baseMainMenu);
+			// Ensure cursor is free and time scale is normal when entering the Main Menu
+			Time.timeScale = 1f;
+			Cursor.lockState = CursorLockMode.None;
+			Cursor.visible = true;
+
+			if (mainMenuRoot != null)
+			{
+				OpenMenu(mainMenuRoot);
+			}
 		}
 	}
 
@@ -37,28 +52,50 @@ public class MenuManager : MonoBehaviour
 	{
 		if (Keyboard.current.escapeKey.wasPressedThisFrame)
 		{
-			HandleEscapeKey();
+			HandleEscapePress();
 		}
 	}
 
-	private void HandleEscapeKey()
+	///////////////////////////
+	// ESCAPE NAVIGATION LOGIC
+	///////////////////////////
+	private void HandleEscapePress()
 	{
-		bool isGameplayScene = SceneManager.GetActiveScene().buildIndex != mainMenuSceneIndex;
-
-		// If a menu is open, safely attempt to close it
 		if (menuStack.Count > 0)
 		{
+			// In gameplay: if at the root pause menu, unpause and resume
+			if (IsGameplayScene && menuStack.Count == 1)
+			{
+				CloseAllAndResume();
+				return;
+			}
+
+			// In Main Menu: do NOT close the root menu on Escape
+			if (!IsGameplayScene && menuStack.Count == 1)
+			{
+				return;
+			}
+
+			// Sub-menus (Options, Controls, Audio, etc.) pop back one step
 			CloseCurrentMenu();
 		}
-		// If no menu is open and we are in gameplay, pause
-		else if (isGameplayScene && !isPaused && pauseMenu != null)
+		else if (IsGameplayScene && PlayerMaster.Instance != null && !PlayerMaster.Instance.IsPaused)
 		{
-			PauseGame();
+			PlayerMaster.Instance.SetPauseState(true);
+			if (pauseMenuRoot != null)
+			{
+				OpenMenu(pauseMenuRoot);
+			}
 		}
 	}
 
+	///////////////////////////
+	// STACK OPERATIONS
+	///////////////////////////
 	public void OpenMenu(GameObject menuToOpen)
 	{
+		if (menuToOpen == null) return;
+
 		if (menuStack.Count > 0)
 		{
 			menuStack.Peek().SetActive(false);
@@ -70,100 +107,81 @@ public class MenuManager : MonoBehaviour
 
 	public void CloseCurrentMenu()
 	{
-		// Prevent closing if the stack is already empty
 		if (menuStack.Count == 0) return;
 
-		bool isGameplayScene = SceneManager.GetActiveScene().buildIndex != mainMenuSceneIndex;
+		// Never pop or disable the root main menu
+		if (!IsGameplayScene && menuStack.Count <= 1) return;
 
-		// If we are down to the last menu in the stack...
-		if (menuStack.Count == 1)
-		{
-			// Unpause if in gameplay, otherwise do nothing so the root UI doesn't vanish
-			if (isGameplayScene) ResumeGame();
-			return;
-		}
+		GameObject active = menuStack.Pop();
+		active.SetActive(false);
 
-		// Hide and remove the current menu
-		GameObject topMenu = menuStack.Pop();
-		topMenu.SetActive(false);
-
-		// Reactivate the previous menu in the history
 		if (menuStack.Count > 0)
 		{
 			menuStack.Peek().SetActive(true);
 		}
 	}
 
-	// Forcefully resets the UI to the root menu for the current scene
+	/// <summary>
+	/// Back Button logic: Clears sub-menus and returns strictly to the scene's highest root menu.
+	/// </summary>
 	public void ReturnToRootMenu()
 	{
-		// Clear all history and hide all active menus
 		while (menuStack.Count > 0)
 		{
 			menuStack.Pop().SetActive(false);
 		}
 
-		bool isGameplayScene = SceneManager.GetActiveScene().buildIndex != mainMenuSceneIndex;
-
-		// Open the correct root menu based on context
-		if (isGameplayScene && pauseMenu != null)
+		if (IsGameplayScene && pauseMenuRoot != null)
 		{
-			isPaused = true;
-			if (playerController != null) playerController.enabled = false;
-			Cursor.lockState = CursorLockMode.Confined;
-
-			OpenMenu(pauseMenu);
+			OpenMenu(pauseMenuRoot);
 		}
-		else if (!isGameplayScene && baseMainMenu != null)
+		else if (!IsGameplayScene && mainMenuRoot != null)
 		{
-			OpenMenu(baseMainMenu);
+			OpenMenu(mainMenuRoot);
 		}
 	}
 
-	public void PauseGame()
+	/// <summary>
+	/// Close Button logic: Closes everything and unpauses during gameplay; returns to root in main menu.
+	/// </summary>
+	public void CloseAllAndResume()
 	{
-		isPaused = true;
-		if (playerController != null) playerController.enabled = false;
-		Cursor.lockState = CursorLockMode.Confined;
-
-		OpenMenu(pauseMenu);
-	}
-
-	public void ResumeGame()
-	{
-		isPaused = false;
-		if (playerController != null) playerController.enabled = true;
-		Cursor.lockState = CursorLockMode.Locked;
-
 		while (menuStack.Count > 0)
 		{
 			menuStack.Pop().SetActive(false);
 		}
+
+		if (IsGameplayScene)
+		{
+			if (PlayerMaster.Instance != null)
+			{
+				PlayerMaster.Instance.SetPauseState(false);
+			}
+		}
+		else if (mainMenuRoot != null)
+		{
+			OpenMenu(mainMenuRoot);
+		}
 	}
 
-	// scene management
-	public void PlayNextScene()
-	{
-		SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex + 1);
-	}
-
+	///////////////////////////
+	// SCENE TRANSITIONS
+	///////////////////////////
 	public void QuitToMainMenu()
 	{
-		// 1. Reset any active pause states
-		isPaused = false;
-		if (playerController != null) playerController.enabled = true;
+		Time.timeScale = 1f;
 
-		// 2. Completely unlock and show the cursor so the player can interact with the Main Menu
+		// Unlock and display the cursor before transitioning scenes
 		Cursor.lockState = CursorLockMode.None;
 		Cursor.visible = true;
 
-		// 3. Load the Main Menu scene (using the index already defined at the top of the script)
-		SceneManager.LoadScene(mainMenuSceneIndex);
-	}
+		if (PlayerMaster.Instance != null)
+		{
+			// Clear pause flag and re-enable motor logic without locking cursor
+			PlayerMaster.Instance.ResetForMenuTransition();
+		}
 
-	public void LoadSceneByIndex(int sceneIndex)
-	{
-		SceneManager.LoadScene(sceneIndex);
+		SceneManager.LoadScene(mainMenuSceneIndex);
 	}
 
 	public void QuitGame()

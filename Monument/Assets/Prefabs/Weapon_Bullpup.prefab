@@ -43,7 +43,7 @@ MeshFilter:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 486875410870718253}
-  m_Mesh: {fileID: 0}
+  m_Mesh: {fileID: 6612739334515889867, guid: 2b86e8b95246f56449a5e119f63e30e8, type: 3}
 --- !u!64 &1690482453871201520
 MeshCollider:
   m_ObjectHideFlags: 0
@@ -54,7 +54,7 @@ MeshCollider:
   m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 4294967295
   m_ExcludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -65,7 +65,7 @@ MeshCollider:
   serializedVersion: 5
   m_Convex: 1
   m_CookingOptions: 30
-  m_Mesh: {fileID: 0}
+  m_Mesh: {fileID: 6612739334515889867, guid: 2b86e8b95246f56449a5e119f63e30e8, type: 3}
 --- !u!54 &8058607454514311187
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -82,10 +82,10 @@ Rigidbody:
   m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
   m_IncludeLayers:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 4294967295
   m_ExcludeLayers:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 3336
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 1
@@ -105,11 +105,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: aa8be8187a91beb43b5dbf91bcdda51c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Weapon
-  playerCamera: {fileID: 0}
-  aimTarget: {fileID: 0}
-  muzzleFlashPrefab: {fileID: 5822910827650730253, guid: 5adfbda6e1c9a59428503c7b8513b8ee, type: 3}
+  bulletSpawn: {fileID: 8073296385252308652}
   bulletPrefab: {fileID: 3915006914338051946, guid: f22c9ba953c64b94aa49273840930429, type: 3}
-  BulletSpawn: {fileID: 8073296385252308652}
+  muzzleFlashPrefab: {fileID: 5822910827650730253, guid: 5adfbda6e1c9a59428503c7b8513b8ee, type: 3}
   leftHandGrip: {fileID: 3203311513384308705}
   rightHandGrip: {fileID: 6432836369975478122}
   magSize: 30
@@ -122,13 +120,9 @@ MonoBehaviour:
   shootingDelay: 0.1
   spreadIntensity: 0.05
   bulletsPerBurst: 4
-  burstBulletsLeft: 0
   dropForwardForce: 5
   dropUpwardForce: 2
   currentShootingMode: 2
-  isShooting: 0
-  readyToShoot: 0
-  isReloading: 0
 --- !u!1001 &5876372929310753818
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -211,23 +205,23 @@ PrefabInstance:
       objectReference: {fileID: 2100000, guid: 4b8dd74da194cf54db2f27ea658bab56, type: 2}
     - target: {fileID: -145979057727943685, guid: 2b86e8b95246f56449a5e119f63e30e8, type: 3}
       propertyPath: m_LocalRotation.w
-      value: -0.019865392
+      value: 0.34588066
       objectReference: {fileID: 0}
     - target: {fileID: -145979057727943685, guid: 2b86e8b95246f56449a5e119f63e30e8, type: 3}
       propertyPath: m_LocalRotation.x
-      value: -0.5093937
+      value: -0.35813388
       objectReference: {fileID: 0}
     - target: {fileID: -145979057727943685, guid: 2b86e8b95246f56449a5e119f63e30e8, type: 3}
       propertyPath: m_LocalRotation.y
-      value: 0.0075780973
+      value: -0.6031035
       objectReference: {fileID: 0}
     - target: {fileID: -145979057727943685, guid: 2b86e8b95246f56449a5e119f63e30e8, type: 3}
       propertyPath: m_LocalRotation.z
-      value: -0.86027086
+      value: -0.6231957
       objectReference: {fileID: 0}
     - target: {fileID: -145979057727943685, guid: 2b86e8b95246f56449a5e119f63e30e8, type: 3}
       propertyPath: m_LocalEulerAnglesHint.x
-      value: -181.907
+      value: -91.907
       objectReference: {fileID: 0}
     - target: {fileID: -145979057727943685, guid: 2b86e8b95246f56449a5e119f63e30e8, type: 3}
       propertyPath: m_LocalEulerAnglesHint.y
