@@ -9,6 +9,7 @@ TagManager:
   - Vehicle
   - Interactable
   - LocalPlayer
+  - Weapon
   layers:
   - Default
   - TransparentFX

@@ -237,38 +237,151 @@ public class humanoidMotor : MonoBehaviour, IDamageable
 		}
 	}
 
+	/// <summary>
+	/// Safely deactivates motor logic and movement collision on death.
+	/// Leaves all GameObjects, renderers, animators, and rigging intact without destroying components,
+	/// keeping the corpse ready for a future revive mechanic.
+	/// </summary>
+	public void DisableMotorOnDeath()
+	{
+		Unpossess();
+
+		if (currentWeapon != null)
+		{
+			DropWeapon();
+		}
+
+		if (playerCollider != null)
+		{
+			playerCollider.enabled = false;
+		}
+
+		Rigidbody rootRb = GetComponent<Rigidbody>();
+		if (rootRb != null)
+		{
+			rootRb.linearVelocity = Vector3.zero;
+			rootRb.angularVelocity = Vector3.zero;
+			rootRb.isKinematic = true;
+			rootRb.detectCollisions = false;
+		}
+
+		enabled = false;
+	}
+
+	/// <summary>
+	/// Safely transitions a dead humanoid into a persistent ragdoll corpse.
+	/// Disables motor and rigging logic without destroying components, preventing Burst job crashes.
+	/// </summary>
+	public void RetireAsCorpse()
+	{
+		gameObject.name = $"[Corpse] {gameObject.name}";
+		gameObject.tag = "Untagged";
+
+		// 1. Unpossess any remaining controller
+		Unpossess();
+
+		if (currentWeapon != null)
+		{
+			DropWeapon();
+		}
+
+		// 2. Disable the upright movement capsule collider so players can walk over it
+		if (playerCollider != null)
+		{
+			playerCollider.enabled = false;
+		}
+
+		// 3. Deactivate root locomotion Rigidbody so only ragdoll bones simulate
+		Rigidbody rootRb = GetComponent<Rigidbody>();
+		if (rootRb != null)
+		{
+			rootRb.isKinematic = true;
+			rootRb.detectCollisions = false;
+		}
+
+		// 4. Safely disable animation rigging without deleting components
+		if (VisualController != null)
+		{
+			VisualController.DisableAndClearRig();
+			VisualController.enabled = false;
+		}
+
+		// 5. Disable animator so physics has complete ragdoll bone authority
+		Animator anim = GetComponentInChildren<Animator>();
+		if (anim != null)
+		{
+			anim.enabled = false;
+		}
+
+		// 6. Disable cameras and audio listeners on the corpse
+		Camera[] corpseCams = GetComponentsInChildren<Camera>(true);
+		for (int i = 0; i < corpseCams.Length; i++) corpseCams[i].enabled = false;
+
+		AudioListener[] corpseListeners = GetComponentsInChildren<AudioListener>(true);
+		for (int i = 0; i < corpseListeners.Length; i++) corpseListeners[i].enabled = false;
+
+		// 7. Disable this motor component
+		enabled = false;
+	}
+
 	// --- POSSESSION & AUTHORITY ---
 
-	public void Possess(MonoBehaviour newController)
+	// --- CONTROLLER POSSESSION OVERLOADS ---
+
+	[Header("Locally Controlled State")]
+	public bool isLocallyControlled { get; private set; } = false;
+
+	public void Possess(playerController controller)
 	{
-		if (currentController != null && currentController != newController)
+		InitializePossession(true);
+	}
+
+	public void Possess(BotController controller)
+	{
+		InitializePossession(false);
+	}
+
+	public void Possess(DummyController controller)
+	{
+		InitializePossession(false);
+	}
+
+	public void Possess(MonoBehaviour controller)
+	{
+		InitializePossession(controller is playerController);
+	}
+
+	private void InitializePossession(bool isLocalPlayer)
+	{
+		isLocallyControlled = isLocalPlayer;
+		isDead = false;
+		if (currentHealth <= 0f) currentHealth = maxHealth;
+
+		if (playerCollider != null) playerCollider.enabled = true;
+
+		Rigidbody rootRb = GetComponent<Rigidbody>();
+		if (rootRb != null)
 		{
-			currentController = null;
+			rootRb.isKinematic = false;
+			rootRb.detectCollisions = true;
 		}
 
-		currentController = newController;
-		bool isPlayer = newController is playerController;
-		SetCameraActive(isPlayer);
+		enabled = true;
 
-		if (visualController == null) visualController = GetComponentInChildren<HumanoidVisualController>();
-		if (visualController != null)
+		if (playerCamera != null)
 		{
-			visualController.ConfigureVisuals(isPlayer);
+			playerCamera.gameObject.SetActive(isLocalPlayer);
+			playerCamera.enabled = isLocalPlayer;
+		}
 
-			// Reconfigure perspective for the held weapon rather than creating duplicate weapons
+		if (VisualController != null)
+		{
+			VisualController.ConfigureVisuals(isLocalPlayer);
+
 			if (currentWeapon != null)
 			{
-				currentWeapon = visualController.SetupWeaponForPerspective(currentWeapon, isPlayer);
+				VisualController.SetupWeaponForPerspective(currentWeapon, isLocallyControlled);
 			}
-			else if (_equippedWeaponPrefab != null)
-			{
-				EquipWeapon(_equippedWeaponPrefab);
-			}
-		}
-
-		if (fallbackDummy != null)
-		{
-			fallbackDummy.enabled = (newController == fallbackDummy);
 		}
 	}
 
@@ -315,7 +428,14 @@ public class humanoidMotor : MonoBehaviour, IDamageable
 	// --- INPUT RECEPTORS ---
 
 	public void SetMoveInput(Vector2 input) => moveInput = Vector2.ClampMagnitude(input, 1f);
-	public void SetSprintInput(bool sprint) => isSprinting = sprint && currentStance == PlayerStance.Standing && moveInput.y > 0.1f;
+	public void SetSprintInput(bool sprint)
+	{
+		isSprinting = sprint && currentStance == PlayerStance.Standing && moveInput.y > 0.1f;
+		if (isSprinting && isAiming)
+		{
+			SetAimInput(false);
+		}
+	}
 	public void SetJumpHeld(bool held) => jumpHeld = held;
 
 	public void Rotate(Vector3 deltaEuler)
@@ -367,58 +487,96 @@ public class humanoidMotor : MonoBehaviour, IDamageable
 		SetStance(currentStance == PlayerStance.Proning ? PlayerStance.Standing : PlayerStance.Proning);
 	}
 
-	// --- WEAPON SYSTEM ---
+	public bool isAiming { get; private set; }
 
+	public void SetAimInput(bool aim)
+	{
+		// Sprinting cancels aim
+		isAiming = aim && !isSprinting;
+
+		if (visualController != null)
+		{
+			visualController.SetAim(isAiming);
+		}
+	}
+
+	// --- WEAPON SYSTEM ---
+	/// <summary>
+	/// Equips a weapon. If the weapon is already an instantiated scene object, it takes direct
+	/// ownership and parents it. If it is an uninstantiated project prefab, it instantiates it.
+	/// </summary>
 	public void EquipWeapon(Weapon weaponPrefabOrInstance)
 	{
 		if (weaponPrefabOrInstance == null) return;
 
-		// 1. If we already hold a different weapon, drop the old one to the floor first
-		if (currentWeapon != null && currentWeapon != weaponPrefabOrInstance)
+		if (currentWeapon != null)
 		{
 			DropWeapon();
 		}
 
-		// If this is a project prefab asset, save the reference; if it's an in-scene object, do not override with a static template
-		if (!weaponPrefabOrInstance.gameObject.scene.IsValid())
+		// Detect if this is an existing world instance or an uninstantiated project prefab
+		if (weaponPrefabOrInstance.gameObject.scene.IsValid())
 		{
-			_equippedWeaponPrefab = weaponPrefabOrInstance;
+			currentWeapon = weaponPrefabOrInstance;
+		}
+		else
+		{
+			currentWeapon = Instantiate(weaponPrefabOrInstance);
 		}
 
-		if (visualController == null) visualController = GetComponentInChildren<HumanoidVisualController>();
-
-		bool isLocal = currentController is playerController;
-		if (visualController != null)
+		if (VisualController != null)
 		{
-			// Parents ground weapons directly or instantiates prefabs
-			currentWeapon = visualController.SetupWeaponForPerspective(weaponPrefabOrInstance, isLocal);
+			VisualController.SetupWeaponForPerspective(currentWeapon, isLocallyControlled);
 		}
 	}
 
+	/// <summary>
+	/// Explicit alias for picking up an existing world weapon instance.
+	/// </summary>
+	public void PickupWeapon(Weapon worldWeapon)
+	{
+		EquipWeapon(worldWeapon);
+	}
+
+	/// <summary>
+	/// Drops the current weapon into the world, restoring its world physics, colliders, and throw velocity.
+	/// </summary>
 	public void DropWeapon()
 	{
 		if (currentWeapon == null) return;
 
-		Weapon droppedInstance = currentWeapon;
+		Weapon dropped = currentWeapon;
 		currentWeapon = null;
-		_equippedWeaponPrefab = null;
 
-		// 1. Restore the physical weapon's visuals, layers, colliders, and Interactable tag
-		if (visualController != null)
+		if (VisualController != null)
 		{
-			visualController.RestoreWeaponForWorld(droppedInstance);
-			visualController.ClearAllWeapons();
-		}
-		else
-		{
-			int defaultLayer = LayerMask.NameToLayer("Default");
-			droppedInstance.gameObject.layer = defaultLayer != -1 ? defaultLayer : 0;
-			droppedInstance.tag = "Interactable";
+			VisualController.RestoreWeaponForWorld(dropped);
+			VisualController.ClearAllWeapons();
 		}
 
-		// 2. Detach from player hierarchy and activate world physics
-		droppedInstance.transform.SetParent(null);
-		droppedInstance.Drop();
+		// Detach from player hierarchy back into the scene root
+		dropped.transform.SetParent(null);
+
+		Vector3 dropPos = transform.position + Vector3.up * 1.0f;
+		Vector3 throwDir = transform.forward;
+
+		if (playerCamera != null && playerCamera.gameObject.activeInHierarchy)
+		{
+			dropPos = playerCamera.transform.position + playerCamera.transform.forward * 0.75f;
+			throwDir = playerCamera.transform.forward;
+		}
+
+		dropped.transform.position = dropPos;
+		dropped.transform.rotation = transform.rotation;
+		dropped.SetOwner(null);
+		dropped.ConfigureWorldPhysics(true);
+
+		Rigidbody rb = dropped.GetComponent<Rigidbody>();
+		if (rb != null)
+		{
+			rb.linearVelocity = (throwDir * 4.5f) + Vector3.up * 1.5f;
+			rb.angularVelocity = UnityEngine.Random.insideUnitSphere * 4f;
+		}
 	}
 
 	private void AlignWeaponAim()

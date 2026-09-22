@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
 
 public class playerController : MonoBehaviour
 {
@@ -11,7 +12,6 @@ public class playerController : MonoBehaviour
 	[SerializeField] private humanoidMotor currentMotor;
 	public humanoidMotor CurrentMotor => currentMotor;
 
-	// Backward-compatibility properties for HUD and Vehicle systems
 	public humanoidMotor motor => currentMotor;
 	public Weapon currentWeapon => currentMotor != null ? currentMotor.currentWeapon : null;
 	public Camera playerCamera => currentMotor != null ? currentMotor.playerCamera : null;
@@ -21,12 +21,11 @@ public class playerController : MonoBehaviour
 	[SerializeField] private float mouseSensMultiplier = 0.01f;
 	[SerializeField] private float joystickLookSens = 150f;
 
-	[Header("Tag-Based Interaction")]
-	[SerializeField] private float interactRange = 3f;
-	[Tooltip("Tag required on an object (or its root) to trigger IInteractable.")]
-	[SerializeField] private string interactableTag = "Interactable";
-	[Tooltip("World layers tested by the interaction raycast. FP arms and player culled layers are automatically excluded.")]
-	[SerializeField] private LayerMask interactRaycastMask = ~0;
+	[Header("SphereCast Interaction")]
+	[SerializeField] private float interactRange = 3.0f;
+	[SerializeField] private float interactRadius = 0.4f;
+	[SerializeField] private LayerMask interactLayerMask;
+	[SerializeField] private float pickupCooldown = 0.35f;
 
 	[Header("Vehicle Control")]
 	public bool inVehicle = false;
@@ -35,7 +34,7 @@ public class playerController : MonoBehaviour
 	[Header("Input Framework")]
 	[SerializeField] private KeybindFramework input;
 
-	// Cached Actions
+	// Actions
 	private InputAction walkAxisAction;
 	private InputAction lookAxisAction;
 	private InputAction walkForwardsAction;
@@ -48,17 +47,16 @@ public class playerController : MonoBehaviour
 	private InputAction proneAction;
 	private InputAction interactAction;
 	private InputAction fireAction;
+	private InputAction aimAction;
 	private InputAction reloadAction;
 	private InputAction dropAction;
 
-	// Vehicle Camera Actions
+	// Vehicle Actions
 	private InputAction vehicleCameraZoomAction;
 	private InputAction vehicleFreeLookAction;
 	private InputAction vehicleLookDeltaAction;
 	private InputAction vehicleLookAxisAction;
 	private InputAction vehicleToggleCameraAction;
-
-	// Ground Vehicle Actions
 	private InputAction vehicleDriveAxisAction;
 	private InputAction vehicleForwardAction;
 	private InputAction vehicleBackwardAction;
@@ -77,14 +75,13 @@ public class playerController : MonoBehaviour
 	private InputAction aircraftYawLeftAction;
 	private InputAction aircraftYawRightAction;
 	private InputAction aircraftToggleModeAction;
-
 	private InputAction aircraftPitchAxisAction;
 	private InputAction aircraftRollAxisAction;
 	private InputAction aircraftYawAxisAction;
 	private InputAction aircraftThrottleAxisAction;
 
 	private bool ignoreNextDelta = true;
-	private bool wasPaused = false;
+	private float _nextInteractAllowedTime = 0f;
 
 	private void Awake()
 	{
@@ -97,7 +94,15 @@ public class playerController : MonoBehaviour
 			}
 		}
 
-		ConfigureInteractLayers();
+		if (interactLayerMask == 0)
+		{
+			interactLayerMask = LayerMask.GetMask("Interactable");
+		}
+
+		if (SceneManager.GetActiveScene().buildIndex == 0)
+		{
+			DisableMasterCamera();
+		}
 	}
 
 	private void Start()
@@ -109,60 +114,97 @@ public class playerController : MonoBehaviour
 
 		CacheInputActions();
 
-		if (PlayerMaster.Instance == null || !PlayerMaster.Instance.IsPaused)
+		if (SceneManager.GetActiveScene().buildIndex != 0)
 		{
-			Cursor.lockState = CursorLockMode.Locked;
-			Cursor.visible = false;
+			if (PlayerMaster.Instance == null || !PlayerMaster.Instance.IsPaused)
+			{
+				Cursor.lockState = CursorLockMode.Locked;
+				Cursor.visible = false;
+			}
 		}
-	}
-
-	private void ConfigureInteractLayers()
-	{
-		// Exclude first-person arms and local body from blocking interaction rays
-		int fpLayer = LayerMask.NameToLayer("FPS_Arms");
-		int tpLayer = LayerMask.NameToLayer("LocalPlayer_TP");
-
-		if (fpLayer != -1) interactRaycastMask &= ~(1 << fpLayer);
-		if (tpLayer != -1) interactRaycastMask &= ~(1 << tpLayer);
+		else
+		{
+			DisableMasterCamera();
+			Cursor.lockState = CursorLockMode.None;
+			Cursor.visible = true;
+		}
 	}
 
 	private void OnEnable() => ignoreNextDelta = true;
 
 	private void OnDisable()
 	{
+		ResetControllerAndMotor();
+	}
+
+	public void DisableMasterCamera()
+	{
+		if (masterCamera != null)
+		{
+			AudioListener al = masterCamera.GetComponent<AudioListener>();
+			if (al != null) al.enabled = false;
+			masterCamera.gameObject.SetActive(false);
+		}
+	}
+
+	public void RestoreMasterCamera()
+	{
+		if (SceneManager.GetActiveScene().buildIndex == 0)
+		{
+			DisableMasterCamera();
+			return;
+		}
+
+		if (masterCamera != null)
+		{
+			masterCamera.gameObject.SetActive(true);
+			AudioListener listener = masterCamera.GetComponent<AudioListener>();
+			if (listener != null) listener.enabled = true;
+		}
+	}
+
+	public void ResetControllerAndMotor()
+	{
 		if (currentMotor != null)
 		{
 			currentMotor.SetMoveInput(Vector2.zero);
 			currentMotor.SetSprintInput(false);
 			currentMotor.SetJumpHeld(false);
+			currentMotor.SetAimInput(false);
+			currentMotor.Unpossess();
+			currentMotor = null;
 		}
 
 		if (inVehicle && activeVehicle != null)
 		{
 			ResetVehicleInputs();
 		}
+
+		inVehicle = false;
+		activeVehicle = null;
+		ignoreNextDelta = true;
+
+		if (SceneManager.GetActiveScene().buildIndex != 0)
+		{
+			RestoreMasterCamera();
+		}
+		else
+		{
+			DisableMasterCamera();
+		}
 	}
 
 	public bool IsControllingAliveEntity()
 	{
 		if (currentMotor == null) return false;
-
-		if (currentMotor.isDead || currentMotor.currentHealth <= 0f)
-		{
-			return false;
-		}
-
-		if (!currentMotor.enabled && !inVehicle)
-		{
-			return false;
-		}
-
+		if (currentMotor.isDead || currentMotor.currentHealth <= 0f) return false;
+		if (!currentMotor.enabled && !inVehicle) return false;
 		return true;
 	}
 
 	public void Possess(humanoidMotor newMotor)
 	{
-		if (currentMotor != null)
+		if (currentMotor != null && currentMotor != newMotor)
 		{
 			currentMotor.Unpossess();
 		}
@@ -171,19 +213,37 @@ public class playerController : MonoBehaviour
 
 		if (currentMotor != null)
 		{
-			if (masterCamera != null)
-			{
-				masterCamera.gameObject.SetActive(false);
-			}
+			DisableMasterCamera();
 
+			// Mute all non-local audio listeners
 			AudioListener[] activeListeners = FindObjectsByType<AudioListener>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
 			foreach (AudioListener listener in activeListeners)
 			{
-				if (listener.transform.IsChildOf(currentMotor.transform)) continue;
+				if (listener.transform.IsChildOf(currentMotor.transform))
+				{
+					listener.enabled = true;
+					continue;
+				}
 				listener.enabled = false;
 			}
 
+			if (input == null && PlayerMaster.Instance != null)
+			{
+				input = PlayerMaster.Instance.keybindFramework;
+			}
+
+			if (input != null && input.movementMap != null && !input.movementMap.enabled)
+			{
+				input.movementMap.Enable();
+			}
+
+			CacheInputActions();
 			currentMotor.Possess(this);
+
+			// Guarantee cursor capture
+			Cursor.lockState = CursorLockMode.Locked;
+			Cursor.visible = false;
+			ignoreNextDelta = true;
 		}
 		else
 		{
@@ -193,23 +253,7 @@ public class playerController : MonoBehaviour
 
 	public void UnpossessCurrent()
 	{
-		if (currentMotor != null)
-		{
-			currentMotor.Unpossess();
-			currentMotor = null;
-		}
-
-		RestoreMasterCamera();
-	}
-
-	private void RestoreMasterCamera()
-	{
-		if (masterCamera != null)
-		{
-			masterCamera.gameObject.SetActive(true);
-			AudioListener listener = masterCamera.GetComponent<AudioListener>();
-			if (listener != null) listener.enabled = true;
-		}
+		ResetControllerAndMotor();
 	}
 
 	public void DisableForVehicle(Vehicle vehicle)
@@ -225,15 +269,13 @@ public class playerController : MonoBehaviour
 			Rigidbody rb = currentMotor.GetComponent<Rigidbody>();
 			if (rb != null)
 			{
+				rb.linearVelocity = Vector3.zero;
+				rb.angularVelocity = Vector3.zero;
 				rb.isKinematic = true;
 				rb.detectCollisions = false;
-				rb.interpolation = RigidbodyInterpolation.None;
 			}
 
-			if (currentMotor.playerCollider != null)
-			{
-				currentMotor.playerCollider.enabled = false;
-			}
+			if (currentMotor.playerCollider != null) currentMotor.playerCollider.enabled = false;
 		}
 	}
 
@@ -252,19 +294,32 @@ public class playerController : MonoBehaviour
 			{
 				rb.isKinematic = false;
 				rb.detectCollisions = true;
-				rb.interpolation = RigidbodyInterpolation.Interpolate;
 			}
 
-			if (currentMotor.playerCollider != null)
-			{
-				currentMotor.playerCollider.enabled = true;
-			}
+			if (currentMotor.playerCollider != null) currentMotor.playerCollider.enabled = true;
 		}
 	}
 
 	private void Update()
 	{
 		if (walkForwardsAction == null) CacheInputActions();
+
+		if (PlayerMaster.Instance != null && PlayerMaster.Instance.IsPaused)
+		{
+			ignoreNextDelta = true;
+			return;
+		}
+
+		// Re-lock mouse cursor on click if gameplay is active
+		if (IsControllingAliveEntity() && Cursor.lockState != CursorLockMode.Locked)
+		{
+			if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+			{
+				Cursor.lockState = CursorLockMode.Locked;
+				Cursor.visible = false;
+				ignoreNextDelta = true;
+			}
+		}
 
 		if (inVehicle)
 		{
@@ -278,7 +333,36 @@ public class playerController : MonoBehaviour
 
 	private void HandleInfantryProcessing()
 	{
-		// 1. Movement
+		if (currentMotor == null) return;
+
+		// Lock out controls completely when dead so DeathCameraTracker has exclusive camera/mouse authority
+		if (currentMotor.isDead || currentMotor.currentHealth <= 0f)
+		{
+			currentMotor.SetMoveInput(Vector2.zero);
+			currentMotor.SetSprintInput(false);
+			currentMotor.SetJumpHeld(false);
+			currentMotor.SetAimInput(false);
+			return;
+		}
+
+		// 1. Mouse & Look Rotation
+		Vector2 mouseDelta = Mouse.current != null ? Mouse.current.delta.ReadValue() : Vector2.zero;
+		if (ignoreNextDelta)
+		{
+			mouseDelta = Vector2.zero;
+			ignoreNextDelta = false;
+		}
+
+		Vector2 joystickLook = lookAxisAction != null ? lookAxisAction.ReadValue<Vector2>() : Vector2.zero;
+		float sens = PlayerMaster.Instance != null ? PlayerMaster.Instance.MouseSensitivity : mouseSens;
+
+		float yaw = (mouseDelta.x * mouseSensMultiplier * sens) + (joystickLook.x * joystickLookSens * Time.deltaTime);
+		float pitch = (-mouseDelta.y * mouseSensMultiplier * sens) + (-joystickLook.y * joystickLookSens * Time.deltaTime);
+
+		currentMotor.Rotate(new Vector3(0f, yaw, 0f));
+		currentMotor.RotateCamera(pitch);
+
+		// 2. Movement Inputs
 		float xMov = 0f, zMov = 0f;
 		if (strafeRightAction != null && strafeRightAction.IsPressed()) xMov += 1f;
 		if (strafeLeftAction != null && strafeLeftAction.IsPressed()) xMov -= 1f;
@@ -299,43 +383,82 @@ public class playerController : MonoBehaviour
 		currentMotor.SetSprintInput(sprintAction != null && sprintAction.IsPressed());
 		currentMotor.SetJumpHeld(jumpAction != null && jumpAction.IsPressed());
 
-		// 2. Look
-		Vector2 mouseDelta = Mouse.current != null ? Mouse.current.delta.ReadValue() : Vector2.zero;
-		if (ignoreNextDelta)
-		{
-			mouseDelta = Vector2.zero;
-			ignoreNextDelta = false;
-		}
-
-		Vector2 joystickLook = lookAxisAction != null ? lookAxisAction.ReadValue<Vector2>() : Vector2.zero;
-		float sens = PlayerMaster.Instance != null ? PlayerMaster.Instance.MouseSensitivity : mouseSens;
-
-		float yaw = (mouseDelta.x * mouseSensMultiplier * sens) + (joystickLook.x * joystickLookSens * Time.deltaTime);
-		float pitch = (-mouseDelta.y * mouseSensMultiplier * sens) + (-joystickLook.y * joystickLookSens * Time.deltaTime);
-
-		currentMotor.Rotate(new Vector3(0f, yaw, 0f));
-		currentMotor.RotateCamera(pitch);
-
-		// 3. Stances & Actions
+		// 3. Stances
 		if (jumpAction != null && jumpAction.triggered) currentMotor.Jump();
 		if (crouchAction != null && crouchAction.triggered) currentMotor.ToggleCrouch();
 		if (proneAction != null && proneAction.triggered) currentMotor.ToggleProne();
-		if (interactAction != null && interactAction.triggered) PerformInteract();
 
-		// 4. Weapons
+		// 4. Interaction
+		if (interactAction != null && interactAction.triggered)
+		{
+			PerformInteract();
+		}
+
+		// 5. Aiming
+		bool isAiming = false;
+		if (!currentMotor.isSprinting)
+		{
+			if (aimAction != null && aimAction.IsPressed())
+				isAiming = true;
+			else if (Mouse.current != null && Mouse.current.rightButton.isPressed)
+				isAiming = true;
+		}
+		currentMotor.SetAimInput(isAiming);
+
+		// 6. Weapons
 		if (currentMotor.currentWeapon != null)
 		{
-			bool fireHeld = fireAction != null && fireAction.IsPressed();
-			bool fireTrig = fireAction != null && fireAction.triggered;
-			currentMotor.currentWeapon.ProcessInput(fireHeld, fireTrig);
+			bool canFire = currentMotor.VisualController == null || currentMotor.VisualController.CanShoot;
+			bool fireHeld = canFire && (fireAction != null && fireAction.IsPressed());
+			bool fireTrig = canFire && (fireAction != null && fireAction.triggered);
 
-			if (fireTrig && currentMotor.VisualController != null)
+			if (fireAction != null && fireAction.triggered && currentMotor.isSprinting)
 			{
-				currentMotor.VisualController.TriggerFire();
+				currentMotor.SetSprintInput(false);
 			}
 
-			if (reloadAction != null && reloadAction.triggered) currentMotor.currentWeapon.Reload();
-			if (dropAction != null && dropAction.triggered) currentMotor.DropWeapon();
+			currentMotor.currentWeapon.ProcessInput(fireHeld, fireTrig);
+
+			if (reloadAction != null && reloadAction.triggered && canFire)
+			{
+				currentMotor.currentWeapon.Reload();
+			}
+
+			if (dropAction != null && dropAction.triggered)
+			{
+				currentMotor.DropWeapon();
+				_nextInteractAllowedTime = Time.time + pickupCooldown;
+			}
+		}
+	}
+
+	private void PerformInteract()
+	{
+		if (Time.time < _nextInteractAllowedTime) return;
+		if (currentMotor == null || currentMotor.playerCamera == null) return;
+
+		Transform cam = currentMotor.playerCamera.transform;
+		Ray ray = new Ray(cam.position, cam.forward);
+
+		if (Physics.SphereCast(ray, interactRadius, out RaycastHit hit, interactRange, interactLayerMask, QueryTriggerInteraction.Collide))
+		{
+			if (hit.transform == currentMotor.transform || hit.transform.IsChildOf(currentMotor.transform))
+				return;
+
+			Vehicle vehicle = hit.collider.GetComponentInParent<Vehicle>();
+			if (vehicle != null && !vehicle.isOccupied)
+			{
+				_nextInteractAllowedTime = Time.time + pickupCooldown;
+				vehicle.EnterVehicle(this);
+				return;
+			}
+
+			IInteractable interactable = hit.collider.GetComponentInParent<IInteractable>();
+			if (interactable != null)
+			{
+				_nextInteractAllowedTime = Time.time + pickupCooldown;
+				interactable.Interact(currentMotor.gameObject);
+			}
 		}
 	}
 
@@ -343,45 +466,18 @@ public class playerController : MonoBehaviour
 	{
 		if (activeVehicle == null) return;
 
-		if (PlayerMaster.Instance != null && PlayerMaster.Instance.IsPaused)
-		{
-			wasPaused = true;
-			ResetVehicleInputs();
-			return;
-		}
-
 		float scroll = vehicleCameraZoomAction != null ? vehicleCameraZoomAction.ReadValue<float>() : 0f;
 		bool freeLook = vehicleFreeLookAction != null && vehicleFreeLookAction.IsPressed();
 		Vector2 mouseDelta = vehicleLookDeltaAction != null ? vehicleLookDeltaAction.ReadValue<Vector2>() : Vector2.zero;
 		Vector2 joystickLook = vehicleLookAxisAction != null ? vehicleLookAxisAction.ReadValue<Vector2>() : Vector2.zero;
 
-		if (wasPaused)
-		{
-			mouseDelta = Vector2.zero;
-			wasPaused = false;
-		}
-
 		activeVehicle.SetCameraInputs(scroll, freeLook, mouseDelta, joystickLook);
 
-		if (vehicleToggleCameraAction != null && vehicleToggleCameraAction.triggered)
-		{
-			activeVehicle.ToggleCamera();
-		}
+		if (vehicleToggleCameraAction != null && vehicleToggleCameraAction.triggered) activeVehicle.ToggleCamera();
+		if (interactAction != null && interactAction.triggered) { activeVehicle.ExitVehicle(); return; }
 
-		if (interactAction != null && interactAction.triggered)
-		{
-			activeVehicle.ExitVehicle();
-			return;
-		}
-
-		if (activeVehicle is GroundVehicle groundVehicle)
-		{
-			ProcessGroundVehicleInput(groundVehicle);
-		}
-		else if (activeVehicle is Aircraft aircraft)
-		{
-			ProcessAircraftInput(aircraft);
-		}
+		if (activeVehicle is GroundVehicle groundVehicle) ProcessGroundVehicleInput(groundVehicle);
+		else if (activeVehicle is Aircraft aircraft) ProcessAircraftInput(aircraft);
 	}
 
 	private void ProcessGroundVehicleInput(GroundVehicle gv)
@@ -398,11 +494,7 @@ public class playerController : MonoBehaviour
 		if (vehicleDriveAxisAction != null)
 		{
 			Vector2 axis = vehicleDriveAxisAction.ReadValue<Vector2>();
-			if (axis.sqrMagnitude > 0.01f)
-			{
-				steer = axis.x;
-				drive = axis.y;
-			}
+			if (axis.sqrMagnitude > 0.01f) { steer = axis.x; drive = axis.y; }
 		}
 
 		gv.SetMotorInputs(drive, steer, brake, boost);
@@ -421,33 +513,14 @@ public class playerController : MonoBehaviour
 		if (aircraftYawLeftAction != null && aircraftYawLeftAction.IsPressed()) yaw -= 1f;
 		if (aircraftYawRightAction != null && aircraftYawRightAction.IsPressed()) yaw += 1f;
 
-		if (aircraftPitchAxisAction != null)
-		{
-			float val = aircraftPitchAxisAction.ReadValue<float>();
-			if (Mathf.Abs(val) > 0.05f) pitch = val;
-		}
-		if (aircraftRollAxisAction != null)
-		{
-			float val = aircraftRollAxisAction.ReadValue<float>();
-			if (Mathf.Abs(val) > 0.05f) roll = val;
-		}
-		if (aircraftYawAxisAction != null)
-		{
-			float val = aircraftYawAxisAction.ReadValue<float>();
-			if (Mathf.Abs(val) > 0.05f) yaw = val;
-		}
-		if (aircraftThrottleAxisAction != null)
-		{
-			float val = aircraftThrottleAxisAction.ReadValue<float>();
-			if (Mathf.Abs(val) > 0.05f) lift = val;
-		}
+		if (aircraftPitchAxisAction != null) { float val = aircraftPitchAxisAction.ReadValue<float>(); if (Mathf.Abs(val) > 0.05f) pitch = val; }
+		if (aircraftRollAxisAction != null) { float val = aircraftRollAxisAction.ReadValue<float>(); if (Mathf.Abs(val) > 0.05f) roll = val; }
+		if (aircraftYawAxisAction != null) { float val = aircraftYawAxisAction.ReadValue<float>(); if (Mathf.Abs(val) > 0.05f) yaw = val; }
+		if (aircraftThrottleAxisAction != null) { float val = aircraftThrottleAxisAction.ReadValue<float>(); if (Mathf.Abs(val) > 0.05f) lift = val; }
 
 		ac.SetFlightInputs(lift, pitch, roll, yaw, 0f, 0f);
 
-		if (aircraftToggleModeAction != null && aircraftToggleModeAction.triggered)
-		{
-			ac.ToggleFlightMode();
-		}
+		if (aircraftToggleModeAction != null && aircraftToggleModeAction.triggered) ac.ToggleFlightMode();
 	}
 
 	private void ResetVehicleInputs()
@@ -455,45 +528,6 @@ public class playerController : MonoBehaviour
 		if (activeVehicle is GroundVehicle gv) gv.SetMotorInputs(0f, 0f, 0f, false);
 		if (activeVehicle is Aircraft ac) ac.SetFlightInputs(0f, 0f, 0f, 0f, 0f, 0f);
 		activeVehicle.SetCameraInputs(0f, false, Vector2.zero, Vector2.zero);
-	}
-
-	private void PerformInteract()
-	{
-		if (currentMotor == null || currentMotor.playerCamera == null) return;
-
-		Ray ray = new Ray(currentMotor.playerCamera.transform.position, currentMotor.playerCamera.transform.forward);
-		if (Physics.Raycast(ray, out RaycastHit hit, interactRange, interactRaycastMask, QueryTriggerInteraction.Ignore))
-		{
-			// Ignore player's own body colliders
-			if (hit.transform == currentMotor.transform || hit.transform.IsChildOf(currentMotor.transform))
-				return;
-
-			// 1. Vehicle entry check
-			Vehicle vehicle = hit.collider.GetComponentInParent<Vehicle>();
-			if (vehicle != null && !vehicle.isOccupied)
-			{
-				vehicle.EnterVehicle(this);
-				return;
-			}
-
-			// 2. Tag check on collider, parent, or attached rigidbody
-			if (IsTaggedInteractable(hit.collider))
-			{
-				IInteractable interactable = hit.collider.GetComponentInParent<IInteractable>();
-				if (interactable != null)
-				{
-					interactable.Interact(gameObject);
-				}
-			}
-		}
-	}
-
-	private bool IsTaggedInteractable(Collider col)
-	{
-		if (col.CompareTag(interactableTag)) return true;
-		if (col.transform.root != null && col.transform.root.CompareTag(interactableTag)) return true;
-		if (col.attachedRigidbody != null && col.attachedRigidbody.CompareTag(interactableTag)) return true;
-		return false;
 	}
 
 	private void CacheInputActions()
@@ -513,6 +547,7 @@ public class playerController : MonoBehaviour
 		proneAction = map.FindAction("Prone");
 		interactAction = map.FindAction("Interact");
 		fireAction = map.FindAction("Fire");
+		aimAction = map.FindAction("Aim") ?? map.FindAction("Scope") ?? map.FindAction("Fire2");
 		reloadAction = map.FindAction("Reload");
 		dropAction = map.FindAction("Drop");
 
@@ -521,7 +556,6 @@ public class playerController : MonoBehaviour
 		vehicleLookDeltaAction = map.FindAction("VehicleLookDelta");
 		vehicleLookAxisAction = map.FindAction("VehicleLookAxis");
 		vehicleToggleCameraAction = map.FindAction("VehicleToggleCamera");
-
 		vehicleDriveAxisAction = map.FindAction("VehicleDriveAxis");
 		vehicleForwardAction = map.FindAction("VehicleForward");
 		vehicleBackwardAction = map.FindAction("VehicleBackward");
@@ -539,7 +573,6 @@ public class playerController : MonoBehaviour
 		aircraftYawLeftAction = map.FindAction("AircraftYawLeft");
 		aircraftYawRightAction = map.FindAction("AircraftYawRight");
 		aircraftToggleModeAction = map.FindAction("AircraftToggleMode");
-
 		aircraftPitchAxisAction = map.FindAction("AircraftPitchAxis");
 		aircraftRollAxisAction = map.FindAction("AircraftRollAxis");
 		aircraftYawAxisAction = map.FindAction("AircraftYawAxis");

@@ -1,0 +1,90 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &6111752450227261421
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5750370694597154404}
+  - component: {fileID: 5529216217201705607}
+  - component: {fileID: 7212392924054409078}
+  m_Layer: 0
+  m_Name: BotMaster
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5750370694597154404
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6111752450227261421}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &5529216217201705607
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6111752450227261421}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 633e5c2e4f81e114ca651c096209b75c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BotMaster
+  botController: {fileID: 7212392924054409078}
+  humanoidPrefab: {fileID: 7786419616176721537, guid: 63905ba65cc01e049904175d9a621559, type: 3}
+  startingWeapon: {fileID: 1647154541418668371, guid: e4481d54a2c2370439f0dac91750efa8, type: 3}
+  spawnOnStart: 1
+  teamId: 2
+--- !u!114 &7212392924054409078
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6111752450227261421}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0328642ea4e75f24cb4d4511a510b830, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BotController
+  currentMotor: {fileID: 0}
+  teamId: 2
+  aggression: 0.6
+  fear: 0.3
+  attention: 0.7
+  visionRange: 30
+  visionAngle: 180
+  hearingRange: 18
+  targetMask:
+    serializedVersion: 2
+    m_Bits: 256
+  obstructionMask:
+    serializedVersion: 2
+    m_Bits: 1
+  minAttackDistance: 5
+  maxAttackDistance: 20
+  rotationSpeed: 8
+  repositionRadius: 6
+  repositionIntervalMin: 2.5
+  repositionIntervalMax: 5
+  burstDurationMin: 0.25
+  burstDurationMax: 0.65
+  burstCooldownMin: 0.4
+  burstCooldownMax: 1.1
+  currentState: 0
+  currentTarget: {fileID: 0}

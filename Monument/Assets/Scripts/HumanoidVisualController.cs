@@ -16,22 +16,24 @@ public class HumanoidVisualController : MonoBehaviour
 	[SerializeField] private GameObject tpRigRoot;
 
 	[Header("Weapon Sockets")]
-	[Tooltip("Socket located on the First-Person Arms rig.")]
 	public Transform fpWeaponHolder;
-	[Tooltip("Socket located on the Third-Person Humanoid rig.")]
 	public Transform tpWeaponHolder;
 
 	[Header("Animators")]
 	[SerializeField] private Animator fpAnimator;
 	[SerializeField] private Animator tpAnimator;
 
+	[Header("Blend Tree Controls")]
+	[SerializeField] private float scopeSpeed = 10f;
+	[SerializeField] private float sprintTransitionSpeed = 8f;
+	[SerializeField] private float sprintToShootSpeed = 12f;
+	[SerializeField] private float sprintShootThreshold = 1.3f;
+
 	[Header("Animation Rigging References")]
 	public Rig humanoidRig;
-	public MultiAimConstraint chestAim;
-	public MultiAimConstraint headAim;
-	public MultiAimConstraint weaponAimR;
-	public TwoBoneIKConstraint armIKR;
 	public TwoBoneIKConstraint armIKL;
+	public TwoBoneIKConstraint armIKR;
+	public MultiAimConstraint weaponAimR;
 	public Transform armIKL_Target;
 	public float weightBlendSpeed = 10f;
 
@@ -39,8 +41,6 @@ public class HumanoidVisualController : MonoBehaviour
 	[SerializeField] private string localPlayerCullLayer = "LocalPlayer_TP";
 	[SerializeField] private string fpArmsLayer = "FPS_Arms";
 
-	// Cached Internal Variables
-	private RigBuilder _rigBuilder;
 	private Renderer[] _tpRenderers;
 	private Rigidbody[] _ragdollRigidbodies;
 	private Collider[] _ragdollColliders;
@@ -50,21 +50,26 @@ public class HumanoidVisualController : MonoBehaviour
 	private bool _isRagdolled = false;
 	private bool _isLocalPlayer = false;
 
-	// Animator Hash IDs
-	private readonly int moveXHash = Animator.StringToHash("MoveX");
-	private readonly int moveYHash = Animator.StringToHash("MoveY");
-	private readonly int groundedStanceHash = Animator.StringToHash("GroundedStance");
-	private readonly int idleStanceHash = Animator.StringToHash("IdleStance");
-	private readonly int isGroundedHash = Animator.StringToHash("IsGrounded");
-	private readonly int inVehicleHash = Animator.StringToHash("InVehicle");
-	private readonly int isArmedHash = Animator.StringToHash("IsArmed");
-	private readonly int speedHash = Animator.StringToHash("Speed");
-	private readonly int isAimingHash = Animator.StringToHash("IsAiming");
-	private readonly int fireTriggerHash = Animator.StringToHash("Fire");
-	private readonly int reloadTriggerHash = Animator.StringToHash("Reload");
+	private readonly HashSet<int> _tpValidParameters = new HashSet<int>();
+	private readonly HashSet<int> _fpValidParameters = new HashSet<int>();
 
-	// Parameter Guards
-	private bool hasMoveX, hasMoveY, hasGroundedStance, hasIdleStance, hasIsGrounded, hasInVehicle, hasIsArmed, hasSpeed;
+	private readonly int tpMoveXHash = Animator.StringToHash("MoveX");
+	private readonly int tpMoveYHash = Animator.StringToHash("MoveY");
+	private readonly int tpGroundedStanceHash = Animator.StringToHash("GroundedStance");
+	private readonly int tpIdleStanceHash = Animator.StringToHash("IdleStance");
+	private readonly int tpIsGroundedHash = Animator.StringToHash("IsGrounded");
+	private readonly int tpInVehicleHash = Animator.StringToHash("InVehicle");
+	private readonly int tpIsArmedHash = Animator.StringToHash("IsArmed");
+
+	private readonly int fpSpeedHash = Animator.StringToHash("Speed");
+	private readonly int fpAimHash = Animator.StringToHash("Aim");
+	private readonly int fpShootTriggerHash = Animator.StringToHash("Shoot");
+
+	private float _currentSpeed = 0f;
+	private float _currentAim = 0f;
+	private float _targetAim = 0f;
+
+	public bool CanShoot => _currentSpeed < sprintShootThreshold;
 
 	private void Awake()
 	{
@@ -86,23 +91,56 @@ public class HumanoidVisualController : MonoBehaviour
 		}
 
 		if (tpAnimator == null && tpRigRoot != null)
-			tpAnimator = tpRigRoot.GetComponentInChildren<Animator>();
+			tpAnimator = tpRigRoot.GetComponentInChildren<Animator>(true);
 
 		if (tpAnimator == null)
-			tpAnimator = GetComponentInChildren<Animator>();
+			tpAnimator = GetComponentInChildren<Animator>(true);
 
-		if (tpAnimator != null)
-			_rigBuilder = tpAnimator.GetComponent<RigBuilder>();
+		if (humanoidRig == null)
+			humanoidRig = GetComponentInChildren<Rig>(true);
 
 		if (tpWeaponHolder == null && motor != null)
 			tpWeaponHolder = motor.weaponHolder;
 
-		if (fpRigRoot != null && fpWeaponHolder == null)
+		// 1. Resolve FP Rig Root recursively
+		if (fpRigRoot == null)
 		{
-			Transform socket = fpRigRoot.transform.Find("FP_WeaponSocket");
-			if (socket == null) socket = fpRigRoot.transform.Find("WeaponHolder");
-			if (socket != null) fpWeaponHolder = socket;
+			Transform found = FindRecursive(transform, "FPS_Rig") ??
+							  FindRecursive(transform, "FP_Rig") ??
+							  FindRecursive(transform, "FP_Arms") ??
+							  FindRecursive(transform, "Arms");
+
+			if (found != null) fpRigRoot = found.gameObject;
 		}
+
+		// 2. Resolve FP Weapon Holder recursively under fpRigRoot
+		if (fpWeaponHolder == null && fpRigRoot != null)
+		{
+			fpWeaponHolder = FindRecursive(fpRigRoot.transform, "FP_WeaponSocket") ??
+							 FindRecursive(fpRigRoot.transform, "WeaponHolder") ??
+							 FindRecursive(fpRigRoot.transform, "WeaponSocket") ??
+							 FindRecursive(fpRigRoot.transform, "Socket");
+		}
+
+		if (fpAnimator == null && fpRigRoot != null)
+		{
+			fpAnimator = fpRigRoot.GetComponentInChildren<Animator>(true);
+		}
+	}
+
+	private static Transform FindRecursive(Transform parent, string targetName)
+	{
+		if (parent == null) return null;
+		if (parent.name == targetName) return parent;
+
+		for (int i = 0; i < parent.childCount; i++)
+		{
+			Transform child = parent.GetChild(i);
+			if (child.name == targetName) return child;
+			Transform found = FindRecursive(child, targetName);
+			if (found != null) return found;
+		}
+		return null;
 	}
 
 	private void Update()
@@ -115,7 +153,56 @@ public class HumanoidVisualController : MonoBehaviour
 		UpdateGripTargetPosition();
 	}
 
-	// --- SETUP & CAMERA CULLING ---
+	private void CacheAnimatorParameters()
+	{
+		_tpValidParameters.Clear();
+		if (tpAnimator != null && tpAnimator.runtimeAnimatorController != null)
+		{
+			foreach (AnimatorControllerParameter p in tpAnimator.parameters)
+			{
+				_tpValidParameters.Add(p.nameHash);
+			}
+		}
+
+		_fpValidParameters.Clear();
+		if (fpAnimator != null && fpAnimator.runtimeAnimatorController != null)
+		{
+			foreach (AnimatorControllerParameter p in fpAnimator.parameters)
+			{
+				_fpValidParameters.Add(p.nameHash);
+			}
+		}
+	}
+
+	private void SetTpBoolSafe(int hash, bool val)
+	{
+		if (tpAnimator != null && tpAnimator.enabled && _tpValidParameters.Contains(hash))
+			tpAnimator.SetBool(hash, val);
+	}
+
+	private void SetTpFloatSafe(int hash, float val, float dampTime = 0f, float dt = 0f)
+	{
+		if (tpAnimator != null && tpAnimator.enabled && _tpValidParameters.Contains(hash))
+		{
+			if (dampTime > 0f) tpAnimator.SetFloat(hash, val, dampTime, dt);
+			else tpAnimator.SetFloat(hash, val);
+		}
+	}
+
+	private void SetFpFloatSafe(int hash, float val)
+	{
+		if (fpAnimator != null && fpAnimator.enabled && _fpValidParameters.Contains(hash))
+			fpAnimator.SetFloat(hash, val);
+	}
+
+	private void SetFpTriggerSafe(int hash)
+	{
+		if (fpAnimator != null && fpAnimator.enabled && _fpValidParameters.Contains(hash))
+		{
+			fpAnimator.ResetTrigger(hash);
+			fpAnimator.SetTrigger(hash);
+		}
+	}
 
 	public void CacheRenderers()
 	{
@@ -128,6 +215,7 @@ public class HumanoidVisualController : MonoBehaviour
 	public void ConfigureVisuals(bool isLocal)
 	{
 		_isLocalPlayer = isLocal;
+		AutoResolveReferences();
 		CacheRenderers();
 		ConfigureCameraCulling(isLocal);
 
@@ -140,6 +228,11 @@ public class HumanoidVisualController : MonoBehaviour
 				fpRigRoot.SetActive(true);
 				int fpLayer = LayerMask.NameToLayer(fpArmsLayer);
 				if (fpLayer != -1) SetLayerRecursively(fpRigRoot, fpLayer);
+
+				foreach (Renderer r in fpRigRoot.GetComponentsInChildren<Renderer>(true))
+				{
+					r.enabled = true;
+				}
 			}
 
 			if (_tpRenderers != null)
@@ -188,128 +281,99 @@ public class HumanoidVisualController : MonoBehaviour
 		int fpLayer = LayerMask.NameToLayer(fpArmsLayer);
 		int tpLocalLayer = LayerMask.NameToLayer(localPlayerCullLayer);
 
-		if (fpLayer != -1) worldCam.cullingMask &= ~(1 << fpLayer);
-		if (tpLocalLayer != -1) worldCam.cullingMask &= ~(1 << tpLocalLayer);
-
-		if (motor.camGimbal != null)
+		if (tpLocalLayer != -1)
 		{
-			Camera[] cams = motor.camGimbal.GetComponentsInChildren<Camera>(true);
-			for (int i = 0; i < cams.Length; i++)
+			worldCam.cullingMask &= ~(1 << tpLocalLayer);
+		}
+
+		Camera overlayCam = null;
+		Camera[] allCams = motor.GetComponentsInChildren<Camera>(true);
+		for (int i = 0; i < allCams.Length; i++)
+		{
+			if (allCams[i] != worldCam)
 			{
-				if (cams[i] != worldCam && fpLayer != -1)
-				{
-					cams[i].cullingMask = (1 << fpLayer);
-				}
+				overlayCam = allCams[i];
+				break;
+			}
+		}
+
+		if (fpLayer != -1)
+		{
+			if (overlayCam != null)
+			{
+				worldCam.cullingMask &= ~(1 << fpLayer);
+				overlayCam.cullingMask = (1 << fpLayer);
+			}
+			else
+			{
+				// Single camera: MUST include the FPS_Arms layer
+				worldCam.cullingMask |= (1 << fpLayer);
 			}
 		}
 	}
 
-	// --- WEAPON PARENTING & SETUP ---
-
-	public Weapon SetupWeaponForPerspective(Weapon sourceWeapon, bool isLocal)
+	public Weapon SetupWeaponForPerspective(Weapon weapon, bool isLocal)
 	{
-		if (sourceWeapon == null) return null;
+		if (weapon == null) return null;
+
+		AutoResolveReferences();
+		ClearFPWeapons();
 
 		Transform targetTpParent = tpWeaponHolder != null ? tpWeaponHolder : transform;
-		Weapon activeTpWeapon;
+		weapon.transform.SetParent(targetTpParent);
+		weapon.transform.localPosition = Vector3.zero;
+		weapon.transform.localRotation = Quaternion.identity;
 
-		// 1. Scene Instance vs Project Prefab: Parent existing ground weapons directly
-		if (sourceWeapon.gameObject.scene.IsValid())
-		{
-			activeTpWeapon = sourceWeapon;
-			activeTpWeapon.transform.SetParent(targetTpParent);
-		}
-		else
-		{
-			activeTpWeapon = Instantiate(sourceWeapon, targetTpParent);
-			activeTpWeapon.name = $"[TP_Firing] {sourceWeapon.name}";
-		}
+		weapon.ConfigureWorldPhysics(false);
+		weapon.SetOwner(motor);
 
-		activeTpWeapon.transform.localPosition = Vector3.zero;
-		activeTpWeapon.transform.localRotation = Quaternion.identity;
-
-		// Purge any orphan/duplicate weapons from the third-person socket
-		if (tpWeaponHolder != null)
-		{
-			for (int i = tpWeaponHolder.childCount - 1; i >= 0; i--)
-			{
-				Transform child = tpWeaponHolder.GetChild(i);
-				if (child != activeTpWeapon.transform)
-				{
-					Destroy(child.gameObject);
-				}
-			}
-		}
-
-		// Disable world physics and colliders while held
-		foreach (var col in activeTpWeapon.GetComponentsInChildren<Collider>(true)) col.enabled = false;
-		Rigidbody rb = activeTpWeapon.GetComponent<Rigidbody>();
-		if (rb != null) { rb.isKinematic = true; rb.detectCollisions = false; }
-
-		// Untag so it cannot be re-interacted with while in hand
-		activeTpWeapon.tag = "Untagged";
-
-		BindLeftHandGrip(activeTpWeapon.leftHandGrip);
+		GameObject worldModel = weapon.EnsureWorldModel();
 
 		int fpLayer = LayerMask.NameToLayer(fpArmsLayer);
 		int tpLocalLayer = LayerMask.NameToLayer(localPlayerCullLayer);
 		int defaultLayer = LayerMask.NameToLayer("Default");
 
-		// Always clear all previous visual models from FP arms
-		ClearFPWeapons();
-
 		if (isLocal)
 		{
-			// Hide the TP weapon from local view while casting shadows
-			foreach (var rend in activeTpWeapon.GetComponentsInChildren<Renderer>(true))
+			if (tpLocalLayer != -1) weapon.gameObject.layer = tpLocalLayer;
+			else if (defaultLayer != -1) weapon.gameObject.layer = defaultLayer;
+
+			if (worldModel != null)
 			{
-				if (rend is ParticleSystemRenderer psr)
+				worldModel.SetActive(true);
+
+				foreach (var rend in worldModel.GetComponentsInChildren<Renderer>(true))
 				{
-					psr.enabled = false;
+					if (rend is ParticleSystemRenderer psr) psr.enabled = false;
+					else if (rend is TrailRenderer tr) tr.enabled = false;
+					else if (rend is LineRenderer lr) lr.enabled = false;
+					else rend.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
 				}
-				else if (rend is TrailRenderer tr)
+
+				foreach (var light in worldModel.GetComponentsInChildren<Light>(true)) light.enabled = false;
+				foreach (var ps in worldModel.GetComponentsInChildren<ParticleSystem>(true))
 				{
-					tr.enabled = false;
+					var em = ps.emission;
+					em.enabled = false;
 				}
-				else if (rend is LineRenderer lr)
-				{
-					lr.enabled = false;
-				}
-				else
-				{
-					rend.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
-				}
+
+				if (tpLocalLayer != -1)
+					SetLayerRecursively(worldModel, tpLocalLayer);
+				else if (defaultLayer != -1)
+					SetLayerRecursively(worldModel, defaultLayer);
 			}
 
-			foreach (var light in activeTpWeapon.GetComponentsInChildren<Light>(true))
+			// Instantiate First-Person Model
+			if (weapon.firstPersonModelPrefab != null && fpWeaponHolder != null)
 			{
-				light.enabled = false;
-			}
-
-			foreach (var ps in activeTpWeapon.GetComponentsInChildren<ParticleSystem>(true))
-			{
-				var em = ps.emission;
-				em.enabled = false;
-			}
-
-			if (tpLocalLayer != -1)
-				SetLayerRecursively(activeTpWeapon.gameObject, tpLocalLayer);
-			else if (defaultLayer != -1)
-				SetLayerRecursively(activeTpWeapon.gameObject, defaultLayer);
-
-			// 2. Instantiate visual-only representation on First-Person arms
-			if (fpWeaponHolder != null)
-			{
-				_spawnedFPVisualWeapon = Instantiate(activeTpWeapon.gameObject, fpWeaponHolder);
-				_spawnedFPVisualWeapon.name = $"[FP_Visual] {activeTpWeapon.name}";
+				_spawnedFPVisualWeapon = Instantiate(weapon.firstPersonModelPrefab, fpWeaponHolder);
+				_spawnedFPVisualWeapon.name = $"[FP] {weapon.firstPersonModelPrefab.name}";
 				_spawnedFPVisualWeapon.transform.localPosition = Vector3.zero;
 				_spawnedFPVisualWeapon.transform.localRotation = Quaternion.identity;
-
-				Weapon fpComp = _spawnedFPVisualWeapon.GetComponent<Weapon>();
-				if (fpComp != null) fpComp.enabled = false;
+				_spawnedFPVisualWeapon.transform.localScale = Vector3.one;
 
 				foreach (var col in _spawnedFPVisualWeapon.GetComponentsInChildren<Collider>(true)) col.enabled = false;
-				foreach (var wRb in _spawnedFPVisualWeapon.GetComponentsInChildren<Rigidbody>(true)) { wRb.isKinematic = true; wRb.detectCollisions = false; }
+				foreach (var rb in _spawnedFPVisualWeapon.GetComponentsInChildren<Rigidbody>(true)) { rb.isKinematic = true; rb.detectCollisions = false; }
 				foreach (var aud in _spawnedFPVisualWeapon.GetComponentsInChildren<AudioSource>(true)) aud.enabled = false;
 
 				foreach (var rend in _spawnedFPVisualWeapon.GetComponentsInChildren<Renderer>(true))
@@ -320,63 +384,105 @@ public class HumanoidVisualController : MonoBehaviour
 
 				if (fpLayer != -1) SetLayerRecursively(_spawnedFPVisualWeapon, fpLayer);
 			}
+			else
+			{
+				if (weapon.firstPersonModelPrefab == null)
+				{
+					Debug.LogWarning($"[HumanoidVisualController] Weapon '{weapon.name}' is missing its firstPersonModelPrefab assignment in the inspector!");
+				}
+				if (fpWeaponHolder == null)
+				{
+					Debug.LogWarning($"[HumanoidVisualController] fpWeaponHolder could not be found under fpRigRoot on '{gameObject.name}'!");
+				}
+			}
+
+			BindFPAnimator();
 		}
 		else
 		{
-			// Remote bot: Fully visible
-			foreach (var rend in activeTpWeapon.GetComponentsInChildren<Renderer>(true))
-			{
-				rend.shadowCastingMode = ShadowCastingMode.On;
-				rend.enabled = true;
-			}
-			foreach (var ps in activeTpWeapon.GetComponentsInChildren<ParticleSystem>(true))
-			{
-				var em = ps.emission;
-				em.enabled = true;
-			}
-			foreach (var light in activeTpWeapon.GetComponentsInChildren<Light>(true))
-			{
-				light.enabled = true;
-			}
+			if (defaultLayer != -1) weapon.gameObject.layer = defaultLayer;
 
-			if (defaultLayer != -1) SetLayerRecursively(activeTpWeapon.gameObject, defaultLayer);
+			if (worldModel != null)
+			{
+				worldModel.SetActive(true);
+
+				foreach (var rend in worldModel.GetComponentsInChildren<Renderer>(true))
+				{
+					rend.shadowCastingMode = ShadowCastingMode.On;
+					rend.enabled = true;
+				}
+
+				foreach (var ps in worldModel.GetComponentsInChildren<ParticleSystem>(true))
+				{
+					var em = ps.emission;
+					em.enabled = true;
+				}
+
+				foreach (var light in worldModel.GetComponentsInChildren<Light>(true)) light.enabled = true;
+
+				if (defaultLayer != -1) SetLayerRecursively(worldModel, defaultLayer);
+			}
 		}
 
-		return activeTpWeapon;
+		BindLeftHandGrip(weapon.leftHandGrip);
+		return weapon;
+	}
+
+	private void BindFPAnimator()
+	{
+		Animator targetAnim = null;
+
+		if (_spawnedFPVisualWeapon != null)
+			targetAnim = _spawnedFPVisualWeapon.GetComponentInChildren<Animator>(true);
+
+		if (targetAnim == null && fpRigRoot != null)
+			targetAnim = fpRigRoot.GetComponentInChildren<Animator>(true);
+
+		if (targetAnim != null)
+		{
+			fpAnimator = targetAnim;
+			fpAnimator.enabled = true;
+			fpAnimator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+			CacheAnimatorParameters();
+		}
 	}
 
 	public void RestoreWeaponForWorld(Weapon weapon)
 	{
 		if (weapon == null) return;
 
-		int defaultLayer = LayerMask.NameToLayer("Default");
-		if (defaultLayer != -1)
+		int interactableLayer = LayerMask.NameToLayer("Interactable");
+		if (interactableLayer == -1) interactableLayer = LayerMask.NameToLayer("Default");
+
+		GameObject worldModel = weapon.EnsureWorldModel();
+		if (worldModel != null)
 		{
-			SetLayerRecursively(weapon.gameObject, defaultLayer);
+			worldModel.SetActive(true);
+
+			foreach (var rend in worldModel.GetComponentsInChildren<Renderer>(true))
+			{
+				rend.enabled = true;
+				rend.shadowCastingMode = ShadowCastingMode.On;
+			}
+
+			foreach (var col in worldModel.GetComponentsInChildren<Collider>(true))
+			{
+				col.enabled = true;
+			}
+
+			foreach (var light in worldModel.GetComponentsInChildren<Light>(true)) light.enabled = true;
+			foreach (var ps in worldModel.GetComponentsInChildren<ParticleSystem>(true))
+			{
+				var em = ps.emission;
+				em.enabled = true;
+			}
+
+			if (interactableLayer != -1) SetLayerRecursively(worldModel, interactableLayer);
 		}
 
-		weapon.tag = "Interactable";
-
-		foreach (var rend in weapon.GetComponentsInChildren<Renderer>(true))
+		if (interactableLayer != -1)
 		{
-			rend.enabled = true;
-			rend.shadowCastingMode = ShadowCastingMode.On;
-		}
-
-		foreach (var col in weapon.GetComponentsInChildren<Collider>(true))
-		{
-			col.enabled = true;
-		}
-
-		foreach (var light in weapon.GetComponentsInChildren<Light>(true))
-		{
-			light.enabled = true;
-		}
-
-		foreach (var ps in weapon.GetComponentsInChildren<ParticleSystem>(true))
-		{
-			var em = ps.emission;
-			em.enabled = true;
+			SetLayerRecursively(weapon.gameObject, interactableLayer);
 		}
 	}
 
@@ -398,6 +504,19 @@ public class HumanoidVisualController : MonoBehaviour
 		ClearFPWeapons();
 	}
 
+	public void SetAim(bool isAiming)
+	{
+		_targetAim = (isAiming && !motor.isSprinting) ? 1f : 0f;
+	}
+
+	public void TriggerFire()
+	{
+		if (!CanShoot) return;
+
+		SetFpTriggerSafe(fpShootTriggerHash);
+		PlayFPMuzzleFlash();
+	}
+
 	public void PlayFPMuzzleFlash()
 	{
 		if (_spawnedFPVisualWeapon == null) return;
@@ -408,8 +527,6 @@ public class HumanoidVisualController : MonoBehaviour
 			systems[i].Play();
 		}
 	}
-
-	// --- RAGDOLL HITBOX SYSTEM ---
 
 	private void CacheRagdollPhysics()
 	{
@@ -463,13 +580,19 @@ public class HumanoidVisualController : MonoBehaviour
 		}
 	}
 
+	public void DisableAndClearRig()
+	{
+		if (humanoidRig != null) humanoidRig.weight = 0f;
+	}
+
 	public void EnableRagdoll(Vector3 inheritedVelocity)
 	{
 		if (_isRagdolled) return;
 		_isRagdolled = true;
 
+		DisableAndClearRig();
+
 		if (tpAnimator != null) tpAnimator.enabled = false;
-		if (_rigBuilder != null) _rigBuilder.enabled = false;
 		if (fpRigRoot != null) fpRigRoot.SetActive(false);
 
 		if (CompareTag("LocalPlayer"))
@@ -518,68 +641,60 @@ public class HumanoidVisualController : MonoBehaviour
 		}
 	}
 
-	// --- ANIMATOR & RIGGING UPDATES ---
-
-	private void CacheAnimatorParameters()
-	{
-		if (tpAnimator == null) return;
-
-		foreach (AnimatorControllerParameter param in tpAnimator.parameters)
-		{
-			if (param.nameHash == moveXHash) hasMoveX = true;
-			else if (param.nameHash == moveYHash) hasMoveY = true;
-			else if (param.nameHash == groundedStanceHash) hasGroundedStance = true;
-			else if (param.nameHash == idleStanceHash) hasIdleStance = true;
-			else if (param.nameHash == isGroundedHash) hasIsGrounded = true;
-			else if (param.nameHash == inVehicleHash) hasInVehicle = true;
-			else if (param.nameHash == isArmedHash) hasIsArmed = true;
-			else if (param.nameHash == speedHash) hasSpeed = true;
-		}
-	}
-
 	private void EvaluateLocomotionState()
 	{
 		_currentState = motor.inVehicle ? AnimationState.Seated : AnimationState.Locomotion;
 
-		if (hasInVehicle) tpAnimator.SetBool(inVehicleHash, _currentState == AnimationState.Seated);
-		if (hasIsArmed) tpAnimator.SetBool(isArmedHash, motor.currentWeapon != null);
+		SetTpBoolSafe(tpInVehicleHash, _currentState == AnimationState.Seated);
+		SetTpBoolSafe(tpIsArmedHash, motor.currentWeapon != null);
 	}
 
 	private void UpdateAnimatorParameters()
 	{
-		if (tpAnimator == null) return;
-
-		if (_currentState == AnimationState.Seated)
-		{
-			if (hasMoveX) tpAnimator.SetFloat(moveXHash, 0f, 0.1f, Time.deltaTime);
-			if (hasMoveY) tpAnimator.SetFloat(moveYHash, 0f, 0.1f, Time.deltaTime);
-			if (hasIdleStance) tpAnimator.SetFloat(idleStanceHash, 1f, 0.1f, Time.deltaTime);
-			return;
-		}
-
 		Rigidbody rb = motor.GetComponent<Rigidbody>();
 		Transform refTransform = motor.bodyGeometry != null ? motor.bodyGeometry : motor.transform;
 		Vector3 localVelocity = refTransform.InverseTransformDirection(rb.linearVelocity);
-
 		float maxSpeed = motor.walkSpeed > 0f ? motor.walkSpeed : 4.5f;
-		float xParam = Mathf.Clamp(localVelocity.x / maxSpeed, -1f, 1f);
-		float yParam = Mathf.Clamp(localVelocity.z / maxSpeed, -1f, 1f);
-
-		if (hasMoveX) tpAnimator.SetFloat(moveXHash, xParam, 0.1f, Time.deltaTime);
-		if (hasMoveY) tpAnimator.SetFloat(moveYHash, yParam, 0.1f, Time.deltaTime);
-
-		float stanceValue = (float)motor.currentStance;
-		if (motor.isSprinting) stanceValue = -1f;
-
-		if (hasGroundedStance) tpAnimator.SetFloat(groundedStanceHash, stanceValue, 0.15f, Time.deltaTime);
-		if (hasIsGrounded) tpAnimator.SetBool(isGroundedHash, motor.isGrounded);
-
 		float planarSpeed = new Vector2(localVelocity.x, localVelocity.z).magnitude;
-		if (hasIdleStance) tpAnimator.SetFloat(idleStanceHash, planarSpeed < 0.1f ? 1f : 0f, 0.1f, Time.deltaTime);
 
-		if (fpAnimator != null && fpAnimator.enabled)
+		float targetSpeed = 0f;
+		if (motor.isSprinting)
 		{
-			fpAnimator.SetFloat(speedHash, Mathf.Clamp01(planarSpeed / maxSpeed), 0.1f, Time.deltaTime);
+			targetSpeed = 2f;
+		}
+		else if (planarSpeed > 0.1f)
+		{
+			targetSpeed = Mathf.Clamp(planarSpeed / maxSpeed, 0.1f, 1f);
+		}
+
+		float speedBlendRate = (targetSpeed < _currentSpeed) ? sprintToShootSpeed : sprintTransitionSpeed;
+		_currentSpeed = Mathf.MoveTowards(_currentSpeed, targetSpeed, Time.deltaTime * speedBlendRate);
+
+		_currentAim = Mathf.MoveTowards(_currentAim, _targetAim, Time.deltaTime * scopeSpeed);
+
+		SetFpFloatSafe(fpSpeedHash, _currentSpeed);
+		SetFpFloatSafe(fpAimHash, _currentAim);
+
+		if (_currentState == AnimationState.Seated)
+		{
+			SetTpFloatSafe(tpMoveXHash, 0f, 0.1f, Time.deltaTime);
+			SetTpFloatSafe(tpMoveYHash, 0f, 0.1f, Time.deltaTime);
+			SetTpFloatSafe(tpIdleStanceHash, 1f, 0.1f, Time.deltaTime);
+		}
+		else
+		{
+			float xParam = Mathf.Clamp(localVelocity.x / maxSpeed, -1f, 1f);
+			float yParam = Mathf.Clamp(localVelocity.z / maxSpeed, -1f, 1f);
+
+			SetTpFloatSafe(tpMoveXHash, xParam, 0.1f, Time.deltaTime);
+			SetTpFloatSafe(tpMoveYHash, yParam, 0.1f, Time.deltaTime);
+
+			float stanceValue = (float)motor.currentStance;
+			if (motor.isSprinting) stanceValue = -1f;
+
+			SetTpFloatSafe(tpGroundedStanceHash, stanceValue, 0.15f, Time.deltaTime);
+			SetTpBoolSafe(tpIsGroundedHash, motor.isGrounded);
+			SetTpFloatSafe(tpIdleStanceHash, planarSpeed < 0.1f ? 1f : 0f, 0.1f, Time.deltaTime);
 		}
 	}
 
@@ -593,8 +708,6 @@ public class HumanoidVisualController : MonoBehaviour
 			return;
 		}
 
-		humanoidRig.weight = Mathf.MoveTowards(humanoidRig.weight, 1f, Time.deltaTime * weightBlendSpeed);
-
 		bool isArmed = motor.currentWeapon != null;
 
 		if (armIKL != null)
@@ -605,9 +718,13 @@ public class HumanoidVisualController : MonoBehaviour
 
 		if (weaponAimR != null)
 		{
-			float targetAimWeight = (isArmed && !motor.isSprinting) ? 1f : 0f;
+			var sources = weaponAimR.data.sourceObjects;
+			bool hasTarget = sources.Count > 0 && sources[0].transform != null;
+			float targetAimWeight = (isArmed && !motor.isSprinting && hasTarget) ? 1f : 0f;
 			weaponAimR.weight = Mathf.MoveTowards(weaponAimR.weight, targetAimWeight, Time.deltaTime * weightBlendSpeed);
 		}
+
+		humanoidRig.weight = Mathf.MoveTowards(humanoidRig.weight, 1f, Time.deltaTime * weightBlendSpeed);
 	}
 
 	private void UpdateGripTargetPosition()
@@ -630,25 +747,6 @@ public class HumanoidVisualController : MonoBehaviour
 	{
 		_currentGripSocket = gripSocket;
 		UpdateGripTargetPosition();
-	}
-
-	public void SetAim(bool isAiming)
-	{
-		if (tpAnimator != null && tpAnimator.enabled) tpAnimator.SetBool(isAimingHash, isAiming);
-		if (fpAnimator != null && fpAnimator.enabled) fpAnimator.SetBool(isAimingHash, isAiming);
-	}
-
-	public void TriggerFire()
-	{
-		if (tpAnimator != null && tpAnimator.enabled) tpAnimator.SetTrigger(fireTriggerHash);
-		if (fpAnimator != null && fpAnimator.enabled) fpAnimator.SetTrigger(fireTriggerHash);
-		PlayFPMuzzleFlash();
-	}
-
-	public void TriggerReload()
-	{
-		if (tpAnimator != null && tpAnimator.enabled) tpAnimator.SetTrigger(reloadTriggerHash);
-		if (fpAnimator != null && fpAnimator.enabled) fpAnimator.SetTrigger(reloadTriggerHash);
 	}
 
 	private void SetLayerRecursively(GameObject obj, int layer)

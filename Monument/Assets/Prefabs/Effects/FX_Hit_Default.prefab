@@ -13,7 +13,7 @@ GameObject:
   - component: {fileID: 3780006614328012793}
   - component: {fileID: 6038821302842278646}
   m_Layer: 0
-  m_Name: HitEffect
+  m_Name: FX_Hit_Default
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -6195,7 +6195,7 @@ ParticleSystem:
         m_NumAlphaKeys: 2
   UVModule:
     serializedVersion: 2
-    enabled: 1
+    enabled: 0
     mode: 0
     timeMode: 0
     fps: 30
@@ -15787,7 +15787,7 @@ ParticleSystem:
         m_NumAlphaKeys: 2
   UVModule:
     serializedVersion: 2
-    enabled: 1
+    enabled: 0
     mode: 0
     timeMode: 0
     fps: 30

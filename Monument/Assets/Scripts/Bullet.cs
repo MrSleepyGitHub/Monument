@@ -6,17 +6,39 @@ public class Bullet : MonoBehaviour
 	[Header("Shooter Exclusion")]
 	[SerializeField] private GameObject shooter;
 
-	[Header("Decal Fallback")]
+	[Header("Impact & Visual Prefabs")]
+	[Tooltip("Prefab spawned on standard solid penetration impacts (bullet hole decal, dust, sparks).")]
+	[SerializeField] private GameObject impactEffectPrefab;
+	[Tooltip("Prefab spawned at the bounce point, oriented along the reflected bullet path (sparks with trails).")]
+	[SerializeField] private GameObject ricochetSparksPrefab;
+
+	[Header("Ricochet Angle & Limits")]
+	[Tooltip("Minimum glancing angle with the surface plane to allow a ricochet (0° is parallel to the surface).")]
+	[Range(0f, 90f)] public float minRicochetAngle = 0f;
+	[Tooltip("Maximum glancing angle with the surface plane to allow a ricochet. Hits steeper than this will embed/impact.")]
+	[Range(0f, 90f)] public float maxRicochetAngle = 28f;
+	[Tooltip("How many times the bullet can bounce before penetrating/lodging.")]
+	public int maxRicochets = 2;
+	[Tooltip("Velocity retained after each bounce.")]
+	[Range(0.1f, 1f)] public float ricochetSpeedRetention = 0.75f;
+	[Tooltip("Damage multiplier retained after each bounce.")]
+	[Range(0.1f, 1f)] public float ricochetDamageMultiplier = 0.6f;
+	public AudioClip ricochetSound;
+
+	[Header("Impact Settings")]
 	[SerializeField] private float defaultDecalLifetime = 20f;
 
 	private float damage;
 	private float lifeTime;
+	private int ricochetCount = 0;
 	private bool hasHit = false;
 	private Collider _myCollider;
+	private Rigidbody _rb;
 
 	private void Awake()
 	{
 		_myCollider = GetComponent<Collider>();
+		_rb = GetComponent<Rigidbody>();
 	}
 
 	private void Start()
@@ -110,23 +132,90 @@ public class Bullet : MonoBehaviour
 			}
 		}
 
-		// Guard: Pass through movement capsule to reach ragdoll hitboxes
+		// Guard: Pass through movement capsule to reach ragdoll bone hitboxes
 		if (humanoidMotor.MovementColliders.Contains(collision.collider))
 		{
 			Physics.IgnoreCollision(_myCollider, collision.collider, true);
 			return;
 		}
 
-		hasHit = true;
+		ContactPoint contact = collision.GetContact(0);
 
-		// Apply damage to hit entity
+		// Calculate glancing angle with the surface plane (0° = parallel along surface, 90° = direct head-on)
+		Vector3 incomingDir = transform.forward;
+		float angleWithNormal = Vector3.Angle(-incomingDir, contact.normal);
+		float grazingAngle = 90f - angleWithNormal;
+
+		// Ricochet check
+		if (ricochetCount < maxRicochets && grazingAngle >= minRicochetAngle && grazingAngle <= maxRicochetAngle)
+		{
+			PerformRicochet(contact, collision);
+			return;
+		}
+
+		// Direct Solid Impact
+		hasHit = true;
+		ApplyImpactDamage(collision, contact);
+		SpawnImpactEffect(contact, collision.collider);
+
+		Destroy(gameObject);
+	}
+
+	private void PerformRicochet(ContactPoint contact, Collision collision)
+	{
+		ricochetCount++;
+
+		// 1. Calculate reflected trajectory
+		Vector3 incomingDir = transform.forward;
+		Vector3 reflectedDir = Vector3.Reflect(incomingDir, contact.normal).normalized;
+
+		// 2. Deal partial damage if grazing a character/entity
+		IDamageable damageable = collision.collider.GetComponentInParent<IDamageable>();
+		if (damageable != null)
+		{
+			damageable.TakeDamage(damage * ricochetDamageMultiplier);
+		}
+		damage *= ricochetDamageMultiplier;
+
+		// 3. Spawn the spark trail emitter at the ricochet site pointing along the reflected angle
+		if (ricochetSparksPrefab != null)
+		{
+			Vector3 sparkSpawnPos = contact.point + contact.normal * 0.02f;
+			GameObject sparks = Instantiate(
+				ricochetSparksPrefab,
+				sparkSpawnPos,
+				Quaternion.LookRotation(reflectedDir)
+			);
+			Destroy(sparks, 2.5f);
+		}
+
+		// 4. Audio
+		if (ricochetSound != null)
+		{
+			AudioSource.PlayClipAtPoint(ricochetSound, contact.point, 0.8f);
+		}
+
+		// 5. Reposition bullet and apply reflected velocity
+		transform.position = contact.point + contact.normal * 0.05f;
+		transform.rotation = Quaternion.LookRotation(reflectedDir);
+
+		float speed = _rb != null ? _rb.linearVelocity.magnitude : 60f;
+		speed = Mathf.Max(speed * ricochetSpeedRetention, 20f);
+
+		if (_rb != null)
+		{
+			_rb.linearVelocity = reflectedDir * speed;
+		}
+	}
+
+	private void ApplyImpactDamage(Collision collision, ContactPoint contact)
+	{
 		IDamageable damageable = collision.collider.GetComponentInParent<IDamageable>();
 		if (damageable != null)
 		{
 			damageable.TakeDamage(damage);
 
 			Vector3 impulse = transform.forward * (damage * 0.5f);
-			ContactPoint contact = collision.GetContact(0);
 
 			if (collision.rigidbody != null && !collision.rigidbody.isKinematic)
 			{
@@ -141,27 +230,23 @@ public class Bullet : MonoBehaviour
 				}
 			}
 		}
-
-		// Spawn impact visual and parent decal to the hit collider
-		if (GlobalReferences.Instance != null && GlobalReferences.Instance.bulletImpactEffectPrefab != null)
-		{
-			ContactPoint contact = collision.GetContact(0);
-			SpawnImpactEffect(contact, collision.collider);
-		}
-
-		Destroy(gameObject);
 	}
 
 	private void SpawnImpactEffect(ContactPoint contact, Collider hitCollider)
 	{
-		Quaternion rot = Quaternion.LookRotation(contact.normal);
-		GameObject impactObj = Instantiate(
-			GlobalReferences.Instance.bulletImpactEffectPrefab,
-			contact.point,
-			rot
-		);
+		GameObject prefabToSpawn = impactEffectPrefab;
 
-		// Route through ImpactEffect component if present
+		// Optional fallback if not assigned directly on this bullet
+		if (prefabToSpawn == null && GlobalReferences.Instance != null)
+		{
+			prefabToSpawn = GlobalReferences.Instance.bulletImpactEffectPrefab;
+		}
+
+		if (prefabToSpawn == null) return;
+
+		Quaternion rot = Quaternion.LookRotation(contact.normal);
+		GameObject impactObj = Instantiate(prefabToSpawn, contact.point, rot);
+
 		ImpactEffect effectComp = impactObj.GetComponent<ImpactEffect>();
 		if (effectComp != null)
 		{
@@ -169,7 +254,7 @@ public class Bullet : MonoBehaviour
 			return;
 		}
 
-		// Fallback separation: search for child decal and parent it to the hit collider
+		// Fallback decal parenting if not using ImpactEffect component
 		Transform decal = impactObj.transform.Find("Decal");
 		if (decal == null)
 		{

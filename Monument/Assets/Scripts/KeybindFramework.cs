@@ -2,6 +2,7 @@
 // KEYBIND FRAMEWORK
 ///////////////////////////
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
@@ -50,7 +51,6 @@ public class KeybindFramework : MonoBehaviour
 	[Header("Hardware Persistence")]
 	public List<DeviceRecord> registeredDevices = new List<DeviceRecord>();
 
-	// Tracks "ActionName_SlotIndex" -> "DeviceIdentifier" for persistent dropdown states
 	private Dictionary<string, string> bindingDeviceMap = new Dictionary<string, string>();
 
 	private const string BINDINGS_KEY = "PlayerCustomBindings";
@@ -94,8 +94,8 @@ public class KeybindFramework : MonoBehaviour
 		allBinds.Clear();
 
 		// --- INFANTRY ACTIONS ---
-		RegisterAction("WalkAxis", "Walk Axis", BindGroup.Infantry, BindInputType.Axis, InputActionType.Value);
-		RegisterAction("LookAxis", "Look Axis", BindGroup.Infantry, BindInputType.Axis, InputActionType.Value);
+		RegisterAction("WalkAxis", "Walk Axis (Stick)", BindGroup.Infantry, BindInputType.Axis, InputActionType.Value, "<Gamepad>/leftStick");
+		RegisterAction("LookAxis", "Look Axis (Stick)", BindGroup.Infantry, BindInputType.Axis, InputActionType.Value, "<Gamepad>/rightStick");
 		RegisterAction("WalkForwards", "Walk Forward", BindGroup.Infantry, BindInputType.Button, InputActionType.Button, "<Keyboard>/w", "<Keyboard>/upArrow");
 		RegisterAction("WalkBackwards", "Walk Backward", BindGroup.Infantry, BindInputType.Button, InputActionType.Button, "<Keyboard>/s", "<Keyboard>/downArrow");
 		RegisterAction("StrafeLeft", "Strafe Left", BindGroup.Infantry, BindInputType.Button, InputActionType.Button, "<Keyboard>/a", "<Keyboard>/leftArrow");
@@ -104,13 +104,14 @@ public class KeybindFramework : MonoBehaviour
 		RegisterAction("Jump", "Jump", BindGroup.Infantry, BindInputType.Button, InputActionType.Button, "<Keyboard>/space");
 		RegisterAction("Crouch", "Crouch", BindGroup.Infantry, BindInputType.Button, InputActionType.Button, "<Keyboard>/c");
 		RegisterAction("Prone", "Prone", BindGroup.Infantry, BindInputType.Button, InputActionType.Button, "<Keyboard>/z");
-		RegisterAction("Interact", "Interact", BindGroup.Infantry, BindInputType.Button, InputActionType.Button, "<Keyboard>/f");
+		RegisterAction("Interact", "Interact", BindGroup.Infantry, BindInputType.Button, InputActionType.Button, "<Keyboard>/e", "<Keyboard>/f");
 		RegisterAction("Fire", "Fire", BindGroup.Infantry, BindInputType.Button, InputActionType.Button, "<Mouse>/leftButton");
+		RegisterAction("Aim", "Aim / Scope", BindGroup.Infantry, BindInputType.Button, InputActionType.Button, "<Mouse>/rightButton");
 		RegisterAction("Reload", "Reload", BindGroup.Infantry, BindInputType.Button, InputActionType.Button, "<Keyboard>/r");
-		RegisterAction("Drop", "Drop", BindGroup.Infantry, BindInputType.Button, InputActionType.Button, "<Keyboard>/q");
+		RegisterAction("Drop", "Drop", BindGroup.Infantry, BindInputType.Button, InputActionType.Button, "<Keyboard>/q", "<Keyboard>/g");
 
 		// --- GROUND VEHICLE ACTIONS ---
-		RegisterAction("VehicleDriveAxis", "Steer / Throttle Axis", BindGroup.GroundVehicles, BindInputType.Axis, InputActionType.Value);
+		RegisterAction("VehicleDriveAxis", "Steer / Throttle Axis", BindGroup.GroundVehicles, BindInputType.Axis, InputActionType.Value, "<Gamepad>/leftStick");
 		RegisterAction("VehicleForward", "Accelerate", BindGroup.GroundVehicles, BindInputType.Button, InputActionType.Button, "<Keyboard>/w", "<Keyboard>/upArrow");
 		RegisterAction("VehicleBackward", "Reverse", BindGroup.GroundVehicles, BindInputType.Button, InputActionType.Button, "<Keyboard>/s", "<Keyboard>/downArrow");
 		RegisterAction("VehicleSteerLeft", "Steer Left", BindGroup.GroundVehicles, BindInputType.Button, InputActionType.Button, "<Keyboard>/a", "<Keyboard>/leftArrow");
@@ -157,18 +158,19 @@ public class KeybindFramework : MonoBehaviour
 	{
 		InputAction action = movementMap.AddAction(actionName, type: actType);
 
-		if (defaultBindings != null)
+		// Guarantee at least 2 binding slots (Slot 0 = Primary, Slot 1 = Secondary)
+		int slotCount = Mathf.Max(2, defaultBindings != null ? defaultBindings.Length : 0);
+		for (int i = 0; i < slotCount; i++)
 		{
-			for (int i = 0; i < defaultBindings.Length; i++)
+			string path = (defaultBindings != null && i < defaultBindings.Length) ? defaultBindings[i] : string.Empty;
+			Guid bindingId = GetDeterministicGuid($"{actionName}_{i}");
+			action.AddBinding(new InputBinding
 			{
-				Guid bindingId = GetDeterministicGuid($"{actionName}_{i}");
-				action.AddBinding(new InputBinding
-				{
-					path = defaultBindings[i],
-					id = bindingId
-				});
-			}
+				path = path,
+				id = bindingId
+			});
 		}
+
 		allBinds.Add(new ActionBindItem(actionName, displayName, group, inputType, action));
 		return action;
 	}
@@ -213,16 +215,13 @@ public class KeybindFramework : MonoBehaviour
 
 		if (record == null)
 		{
-			// By default, enable Keyboard, Mouse, and any connected Joysticks/Gamepads
-			bool defaultEnabled = true;
-
 			record = new DeviceRecord
 			{
 				deviceIdentifier = identifier,
 				displayName = hardwareName,
 				originalName = hardwareName,
 				isConnected = connected,
-				isEnabled = defaultEnabled,
+				isEnabled = true,
 				runtimeDeviceId = connected ? device.deviceId : -1
 			};
 			registeredDevices.Add(record);
@@ -261,7 +260,6 @@ public class KeybindFramework : MonoBehaviour
 		if (device is Mouse) return "Mouse";
 
 		string baseName = string.IsNullOrEmpty(device.description.product) ? device.name : device.description.product;
-		// Distinguishes dual flight sticks (e.g. "T.16000M (ID: 3)")
 		return $"{baseName}_{device.deviceId}";
 	}
 
@@ -345,7 +343,6 @@ public class KeybindFramework : MonoBehaviour
 			return devId;
 		}
 
-		// Resolves identifier from the physical binding path
 		if (slotIndex < action.bindings.Count)
 		{
 			string path = action.bindings[slotIndex].effectivePath ?? action.bindings[slotIndex].path;
@@ -396,40 +393,55 @@ public class KeybindFramework : MonoBehaviour
 	///////////////////////////
 	public void PerformInteractiveRebind(InputAction actionToBind, int slotIndex, Action onRebindComplete)
 	{
-		actionToBind.Disable();
+		if (actionToBind == null) return;
+		StartCoroutine(ExecuteRebindRoutine(actionToBind, slotIndex, onRebindComplete));
+	}
 
-		while (actionToBind.bindings.Count <= slotIndex)
+	private IEnumerator ExecuteRebindRoutine(InputAction actionToBind, int slotIndex, Action onRebindComplete)
+	{
+		// 1. Wait until the mouse click that clicked the UI button has released
+		yield return new WaitForSecondsRealtime(0.12f);
+		while (Mouse.current != null && Mouse.current.leftButton.isPressed)
 		{
-			Guid newId = GetDeterministicGuid($"{actionToBind.name}_{actionToBind.bindings.Count}");
-			actionToBind.AddBinding(new InputBinding
-			{
-				path = string.Empty,
-				id = newId
-			});
+			yield return null;
 		}
 
-		var rebind = actionToBind.PerformInteractiveRebinding()
-			.WithTargetBinding(slotIndex)
-			.WithCancelingThrough("<Keyboard>/escape");
+		// 2. Safely ensure slot allocation without throwing map-enabled exceptions
+		if (slotIndex >= actionToBind.bindings.Count)
+		{
+			bool wasMapEnabled = movementMap != null && movementMap.enabled;
+			if (wasMapEnabled) movementMap.Disable();
 
-		// Excludes continuous mouse movements from hijacking flight axis rebinds
-		rebind.WithControlsExcluding("<Pointer>/position")
-			  .WithControlsExcluding("<Pointer>/delta");
+			while (actionToBind.bindings.Count <= slotIndex)
+			{
+				Guid newId = GetDeterministicGuid($"{actionToBind.name}_{actionToBind.bindings.Count}");
+				actionToBind.AddBinding(new InputBinding
+				{
+					path = string.Empty,
+					id = newId
+				});
+			}
 
-		// 35% actuation deadzone to prevent resting throttle sliders from instant-firing
-		rebind.WithMagnitudeHavingToBeGreaterThan(0.35f);
+			if (wasMapEnabled) movementMap.Enable();
+		}
 
-		// Validates that the input source has not been disabled in the Input Devices tab
+		actionToBind.Disable();
+
+		var rebind = actionToBind.PerformInteractiveRebinding(slotIndex)
+			.WithCancelingThrough("<Keyboard>/escape")
+			.WithControlsExcluding("<Pointer>/position")
+			.WithControlsExcluding("<Pointer>/delta")
+			.WithMagnitudeHavingToBeGreaterThan(0.35f);
+
 		rebind.OnComputeScore((control, eventPtr) =>
 		{
 			if (control == null || control.device == null) return -1f;
 
-			// Checks whether this device has been toggled off by the player
 			string identifier = GetDeviceIdentifier(control.device);
 			var devRecord = registeredDevices.Find(d => d.deviceIdentifier == identifier || d.runtimeDeviceId == control.device.deviceId);
 			if (devRecord != null && !devRecord.isEnabled)
 			{
-				return -1f; // Reject disabled hardware
+				return -1f;
 			}
 
 			return 1f;
@@ -462,17 +474,16 @@ public class KeybindFramework : MonoBehaviour
 
 	public void RemoveBindingAtSlot(InputAction action, int slotIndex)
 	{
-		if (slotIndex >= 0 && slotIndex < action.bindings.Count)
-		{
-			action.Disable();
-			action.ChangeBinding(slotIndex).Erase();
-			action.Enable();
-			SaveBindingsToDisk();
-		}
+		if (action == null || slotIndex < 0 || slotIndex >= action.bindings.Count) return;
+
+		// Overrides slot with empty string rather than mutating collection structure
+		action.ApplyBindingOverride(slotIndex, string.Empty);
+		SaveBindingsToDisk();
 	}
 
 	public void SaveBindingsToDisk()
 	{
+		if (movementMap == null) return;
 		string json = movementMap.SaveBindingOverridesAsJson();
 		PlayerPrefs.SetString(BINDINGS_KEY, json);
 		PlayerPrefs.Save();
@@ -480,19 +491,38 @@ public class KeybindFramework : MonoBehaviour
 
 	public void LoadBindingsFromDisk()
 	{
+		if (movementMap == null) return;
 		if (PlayerPrefs.HasKey(BINDINGS_KEY))
 		{
-			movementMap.LoadBindingOverridesFromJson(PlayerPrefs.GetString(BINDINGS_KEY));
+			try
+			{
+				string json = PlayerPrefs.GetString(BINDINGS_KEY);
+				if (!string.IsNullOrEmpty(json))
+				{
+					movementMap.LoadBindingOverridesFromJson(json);
+				}
+			}
+			catch (Exception ex)
+			{
+				Debug.LogWarning($"[KeybindFramework] Saved bindings invalid. Resetting. {ex.Message}");
+				PlayerPrefs.DeleteKey(BINDINGS_KEY);
+			}
 		}
 	}
 
-	[ContextMenu("Reset Saved Bindings")]
+	[ContextMenu("Reset Saved Bindings (Factory Default)")]
 	public void ResetSavedBindings()
 	{
 		PlayerPrefs.DeleteKey(BINDINGS_KEY);
 		PlayerPrefs.DeleteKey(BINDING_DEVICE_MAP_KEY);
-		movementMap.RemoveAllBindingOverrides();
 		bindingDeviceMap.Clear();
-		Debug.Log("[KeybindFramework] Cleared bindings and hardware device mapping.");
+
+		if (movementMap != null)
+		{
+			movementMap.RemoveAllBindingOverrides();
+		}
+
+		InitializeActions();
+		Debug.Log("[KeybindFramework] Cleared custom overrides and restored clean default bindings.");
 	}
 }

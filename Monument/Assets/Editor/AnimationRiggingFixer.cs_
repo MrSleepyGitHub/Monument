@@ -1,0 +1,157 @@
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine;
+using UnityEngine.Animations.Rigging;
+using UnityEngine.SceneManagement;
+
+[InitializeOnLoad]
+public static class AnimationRiggingFixer
+{
+	static AnimationRiggingFixer()
+	{
+		EditorApplication.playModeStateChanged += OnPlayModeChanged;
+	}
+
+	private static void OnPlayModeChanged(PlayModeStateChange state)
+	{
+		if (state == PlayModeStateChange.ExitingEditMode)
+		{
+			FixAllConstraintsInCurrentScene(false);
+		}
+	}
+
+	[MenuItem("Tools/Fix Animation Rigging Constraints")]
+	public static void FixAllMenu()
+	{
+		FixAllConstraintsInCurrentScene(true);
+		FixHumanoidPrefab();
+	}
+
+	public static void FixAllConstraintsInCurrentScene(bool logResults)
+	{
+		Scene activeScene = SceneManager.GetActiveScene();
+		GameObject[] rootObjects = activeScene.GetRootGameObjects();
+		int fixedCount = 0;
+
+		for (int r = 0; r < rootObjects.Length; r++)
+		{
+			MultiAimConstraint[] aims = rootObjects[r].GetComponentsInChildren<MultiAimConstraint>(true);
+			for (int i = 0; i < aims.Length; i++)
+			{
+				if (RepairConstraint(aims[i]))
+				{
+					fixedCount++;
+				}
+			}
+		}
+
+		if (fixedCount > 0)
+		{
+			EditorSceneManager.MarkSceneDirty(activeScene);
+			if (logResults)
+			{
+				Debug.Log($"[AnimationRiggingFixer] Successfully repaired {fixedCount} MultiAimConstraint(s) in scene '{activeScene.name}'!");
+			}
+		}
+		else if (logResults)
+		{
+			Debug.Log($"[AnimationRiggingFixer] All constraints in scene '{activeScene.name}' are healthy.");
+		}
+	}
+
+	public static void FixHumanoidPrefab()
+	{
+		string[] prefabGuids = AssetDatabase.FindAssets("t:Prefab Humanoid");
+		foreach (string guid in prefabGuids)
+		{
+			string path = AssetDatabase.GUIDToAssetPath(guid);
+			GameObject prefabRoot = PrefabUtility.LoadPrefabContents(path);
+			if (prefabRoot == null) continue;
+
+			bool modified = false;
+			MultiAimConstraint[] aims = prefabRoot.GetComponentsInChildren<MultiAimConstraint>(true);
+			for (int i = 0; i < aims.Length; i++)
+			{
+				if (RepairConstraint(aims[i]))
+				{
+					modified = true;
+				}
+			}
+
+			if (modified)
+			{
+				PrefabUtility.SaveAsPrefabAsset(prefabRoot, path);
+				Debug.Log($"[AnimationRiggingFixer] Repaired and saved Prefab at '{path}'!");
+			}
+
+			PrefabUtility.UnloadPrefabContents(prefabRoot);
+		}
+	}
+
+	private static bool RepairConstraint(MultiAimConstraint constraint)
+	{
+		if (constraint == null) return false;
+
+		// 1. If the bone to aim is missing, shut down the constraint completely
+		if (constraint.data.constrainedObject == null)
+		{
+			constraint.weight = 0f;
+			constraint.enabled = false;
+			EditorUtility.SetDirty(constraint);
+			return true;
+		}
+
+		// 2. Find or create an internal dedicated aim target on the character
+		Transform root = constraint.transform.root;
+		Transform defaultTarget = root.Find("AimTarget");
+		if (defaultTarget == null)
+		{
+			GameObject targetObj = new GameObject("AimTarget");
+			targetObj.transform.SetParent(root, false);
+			targetObj.transform.localPosition = new Vector3(0f, 1.5f, 10f);
+			defaultTarget = targetObj.transform;
+			EditorUtility.SetDirty(targetObj);
+		}
+
+		// 3. Inspect sources
+		var data = constraint.data;
+		var sources = data.sourceObjects;
+		bool modified = false;
+
+		if (sources.Count == 0)
+		{
+			sources.Add(new WeightedTransform(defaultTarget, 1f));
+			modified = true;
+		}
+		else
+		{
+			for (int s = 0; s < sources.Count; s++)
+			{
+				if (sources[s].transform == null)
+				{
+					sources[s] = new WeightedTransform(defaultTarget, sources[s].weight > 0f ? sources[s].weight : 1f);
+					modified = true;
+				}
+			}
+		}
+
+		if (modified)
+		{
+			data.sourceObjects = sources;
+			constraint.data = data;
+			EditorUtility.SetDirty(constraint);
+
+			RigBuilder rb = constraint.GetComponentInParent<RigBuilder>();
+			if (rb != null)
+			{
+				rb.Clear();
+				rb.Build();
+				EditorUtility.SetDirty(rb);
+			}
+		}
+
+		return modified;
+	}
+}
+#endif

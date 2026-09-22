@@ -36,7 +36,7 @@ public class SpawnPoint : MonoBehaviour
 
 	public bool IsAvailable()
 	{
-		// 1. Check direct reservation reference using humanoidMotor
+		// 1. Check active occupant reference
 		if (currentOccupant != null)
 		{
 			humanoidMotor occupantMotor = currentOccupant.GetComponent<humanoidMotor>();
@@ -49,13 +49,20 @@ public class SpawnPoint : MonoBehaviour
 			currentOccupant = null;
 		}
 
-		// 2. Physical overlap sphere test for characters, ragdolls, and vehicles
+		// 2. Physical overlap test for living motors and vehicles
 		Vector3 checkCenter = transform.position + Vector3.up * 0.5f;
 		Collider[] hits = Physics.OverlapSphere(checkCenter, clearanceRadius, clearanceObstructionMask, QueryTriggerInteraction.Ignore);
 
 		for (int i = 0; i < hits.Length; i++)
 		{
-			if (hits[i].GetComponentInParent<humanoidMotor>() != null || hits[i].GetComponentInParent<Vehicle>() != null)
+			humanoidMotor motor = hits[i].GetComponentInParent<humanoidMotor>();
+			if (motor != null && !motor.isDead)
+			{
+				return false;
+			}
+
+			Vehicle vehicle = hits[i].GetComponentInParent<Vehicle>();
+			if (vehicle != null)
 			{
 				return false;
 			}
@@ -71,6 +78,17 @@ public class SpawnPoint : MonoBehaviour
 
 	public static SpawnPoint GetAvailableSpawnPoint(SpawnRole role, int requestedTeamId, bool randomPick = true)
 	{
+		// Try exact role match first, then fall back to Any if role was PlayerOnly or BotOnly
+		SpawnPoint point = QuerySpawnList(role, requestedTeamId, randomPick);
+		if (point == null && role != SpawnRole.Any)
+		{
+			point = QuerySpawnList(SpawnRole.Any, requestedTeamId, randomPick);
+		}
+		return point;
+	}
+
+	private static SpawnPoint QuerySpawnList(SpawnRole role, int requestedTeamId, bool randomPick)
+	{
 		List<SpawnPoint> exactTeamCandidates = new List<SpawnPoint>();
 		List<SpawnPoint> neutralTeamCandidates = new List<SpawnPoint>();
 
@@ -79,7 +97,7 @@ public class SpawnPoint : MonoBehaviour
 			SpawnPoint sp = activeSpawnPoints[i];
 			if (sp == null || !sp.IsAvailable()) continue;
 
-			bool roleMatches = sp.allowedRole == SpawnRole.Any || sp.allowedRole == role;
+			bool roleMatches = sp.allowedRole == role;
 			if (!roleMatches) continue;
 
 			if (sp.teamId == requestedTeamId && requestedTeamId != 0)
@@ -92,16 +110,10 @@ public class SpawnPoint : MonoBehaviour
 			}
 		}
 
-		// Prioritize exact team matching before falling back to neutral spawns
 		List<SpawnPoint> finalCandidates = exactTeamCandidates.Count > 0 ? exactTeamCandidates : neutralTeamCandidates;
 		if (finalCandidates.Count == 0) return null;
 
-		if (randomPick)
-		{
-			return finalCandidates[Random.Range(0, finalCandidates.Count)];
-		}
-
-		return finalCandidates[0];
+		return randomPick ? finalCandidates[Random.Range(0, finalCandidates.Count)] : finalCandidates[0];
 	}
 
 	private void OnDrawGizmos()

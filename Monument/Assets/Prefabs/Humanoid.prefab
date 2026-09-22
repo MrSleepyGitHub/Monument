@@ -81,7 +81,7 @@ MonoBehaviour:
     m_SourceObjects:
       m_Length: 1
       m_Item0:
-        transform: {fileID: 7444286680868557809}
+        transform: {fileID: 3060437482455729773}
         weight: 1
       m_Item1:
         transform: {fileID: 0}
@@ -317,6 +317,7 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
+  - {fileID: 3060437482455729773}
   - {fileID: 2331111110268607220}
   - {fileID: 5601822192790912793}
   - {fileID: 1203586184741032306}
@@ -604,7 +605,7 @@ MonoBehaviour:
     m_SourceObjects:
       m_Length: 1
       m_Item0:
-        transform: {fileID: 7444286680868557809}
+        transform: {fileID: 3060437482455729773}
         weight: 1
       m_Item1:
         transform: {fileID: 0}
@@ -673,6 +674,37 @@ Transform:
   - {fileID: 8509296092737064206}
   m_Father: {fileID: 659984189178187330}
   m_LocalEulerAnglesHint: {x: -90, y: 0, z: 90}
+--- !u!1 &2691834861647095864
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 3060437482455729773}
+  m_Layer: 0
+  m_Name: AimTarget
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &3060437482455729773
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2691834861647095864}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 1.5, z: 10}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 8023778692686044909}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2992538213339528989
 GameObject:
   m_ObjectHideFlags: 0
@@ -697,8 +729,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2992538213339528989}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.26292092, y: -0.7004673, z: -0.5740465, w: 0.33269957}
-  m_LocalPosition: {x: -0.08690001, y: -0.005300343, z: 0.24250017}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 0.01, y: 0.009999999, z: 0.009999996}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -806,7 +838,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: aeda7bfbf984f2a4da5ab4b8967b115d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Animation.Rigging::UnityEngine.Animations.Rigging.TwoBoneIKConstraint
-  m_Weight: 1
+  m_Weight: 0
   m_Data:
     m_Root: {fileID: 9028245723711459613}
     m_Mid: {fileID: 4387820353199930196}
@@ -865,9 +897,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::DeathCameraTracker
   motor: {fileID: 5414638844574783610}
   trackTarget: {fileID: 6130524162539044954}
-  followOffset: {x: 0, y: 1.8, z: -3.5}
+  cameraDistance: 3.5
+  cameraHeightOffset: 0.5
+  mouseOrbitSensitivity: 0.15
   followDamping: 4
   rotationDamping: 6
+  pitchClamp: {x: -20, y: 75}
   collisionMask:
     serializedVersion: 2
     m_Bits: 0
@@ -906,61 +941,6 @@ Transform:
   - {fileID: 7444286680868557809}
   m_Father: {fileID: 4743630065237882860}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &4766068945107945967
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 3005384115524280736}
-  - component: {fileID: 1731236347153815874}
-  m_Layer: 8
-  m_Name: FP_Rig
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &3005384115524280736
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4766068945107945967}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children:
-  - {fileID: 9113839626503169168}
-  m_Father: {fileID: 3085800874089937395}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!95 &1731236347153815874
-Animator:
-  serializedVersion: 7
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4766068945107945967}
-  m_Enabled: 1
-  m_Avatar: {fileID: 0}
-  m_Controller: {fileID: 0}
-  m_CullingMode: 0
-  m_UpdateMode: 0
-  m_ApplyRootMotion: 0
-  m_LinearVelocityBlending: 0
-  m_StabilizeFeet: 0
-  m_AnimatePhysics: 0
-  m_WarningMessage: 
-  m_HasTransformHierarchy: 1
-  m_AllowConstantClipSamplingOptimization: 1
-  m_KeepAnimatorStateOnDisable: 0
-  m_WriteDefaultValuesOnDisable: 0
 --- !u!1 &4773845040824291079
 GameObject:
   m_ObjectHideFlags: 0
@@ -1023,7 +1003,7 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 3005384115524280736}
+  - {fileID: 9113839626503169168}
   m_Father: {fileID: 5801550561002030049}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!20 &4702263516020345733
@@ -1267,7 +1247,7 @@ MonoBehaviour:
     m_SourceObjects:
       m_Length: 1
       m_Item0:
-        transform: {fileID: 7444286680868557809}
+        transform: {fileID: 3060437482455729773}
         weight: 1
       m_Item1:
         transform: {fileID: 0}
@@ -1327,12 +1307,12 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7383155990601162867}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.095, y: -0.4, z: 0.27}
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 3005384115524280736}
+  m_Father: {fileID: 3085800874089937395}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &7786419616176721537
 GameObject:
@@ -1460,7 +1440,7 @@ MonoBehaviour:
   groundCheck: {fileID: 7460346011961539858}
   camHolder: {fileID: 4743630065237882860}
   camGimbal: {fileID: 5645487034459861051}
-  aimTarget: {fileID: 7444286680868557809}
+  aimTarget: {fileID: 3060437482455729773}
   playerCamera: {fileID: 131838225045679592}
   cameraListener: {fileID: 151938375312515340}
   weaponHolder: {fileID: 7498786108292756328}
@@ -1479,7 +1459,7 @@ MonoBehaviour:
   standingHeight: 1.75
   crouchingHeight: 1.23
   proningHeight: 1
-  standingCamLocalPos: {x: 0, y: 1.7, z: 0}
+  standingCamLocalPos: {x: 0, y: 1.5, z: 0}
   crouchingCamLocalPos: {x: 0, y: 1, z: 0}
   proningCamLocalPos: {x: 0, y: 0.35, z: 0}
   stanceTransitionSpeed: 10
@@ -1502,13 +1482,18 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::HumanoidVisualController
   motor: {fileID: 5414638844574783610}
-  fpRigRoot: {fileID: 4766068945107945967}
+  fpRigRoot: {fileID: 0}
   tpRigRoot: {fileID: 7213339236355605285}
   fpWeaponHolder: {fileID: 9113839626503169168}
   tpWeaponHolder: {fileID: 7498786108292756328}
-  fpAnimator: {fileID: 1731236347153815874}
+  fpAnimator: {fileID: 0}
   tpAnimator: {fileID: 4157123350005580773}
+  scopeSpeed: 10
+  sprintTransitionSpeed: 8
+  sprintToShootSpeed: 12
+  sprintShootThreshold: 1.3
   humanoidRig: {fileID: 584950860450656132}
+  rigBuilder: {fileID: 3954182489266967027}
   chestAim: {fileID: 3813967233961301682}
   headAim: {fileID: 6008454352002637809}
   weaponAimR: {fileID: 4372180683516780948}
@@ -1516,6 +1501,7 @@ MonoBehaviour:
   armIKL: {fileID: 4028189771113845812}
   armIKL_Target: {fileID: 4231246353052605225}
   weightBlendSpeed: 10
+  aimTarget: {fileID: 3060437482455729773}
   localPlayerCullLayer: LocalPlayer_TP
   fpArmsLayer: FPS_Arms
 --- !u!1001 &7555777938320277108
@@ -2031,7 +2017,7 @@ Rigidbody:
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 1
-  m_IsKinematic: 0
+  m_IsKinematic: 1
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
@@ -2135,7 +2121,7 @@ Rigidbody:
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 1
-  m_IsKinematic: 0
+  m_IsKinematic: 1
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
@@ -2254,7 +2240,7 @@ Rigidbody:
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 1
-  m_IsKinematic: 0
+  m_IsKinematic: 1
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
@@ -2354,7 +2340,7 @@ Rigidbody:
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 1
-  m_IsKinematic: 0
+  m_IsKinematic: 1
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
@@ -2455,7 +2441,7 @@ Rigidbody:
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 1
-  m_IsKinematic: 0
+  m_IsKinematic: 1
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
@@ -2586,7 +2572,7 @@ Rigidbody:
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 1
-  m_IsKinematic: 0
+  m_IsKinematic: 1
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
@@ -2687,7 +2673,7 @@ Rigidbody:
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 1
-  m_IsKinematic: 0
+  m_IsKinematic: 1
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
@@ -2828,7 +2814,7 @@ Rigidbody:
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 1
-  m_IsKinematic: 0
+  m_IsKinematic: 1
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
@@ -2944,7 +2930,7 @@ Rigidbody:
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 1
-  m_IsKinematic: 0
+  m_IsKinematic: 1
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
@@ -3075,7 +3061,7 @@ Rigidbody:
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 1
-  m_IsKinematic: 0
+  m_IsKinematic: 1
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
@@ -3176,7 +3162,7 @@ Rigidbody:
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 1
-  m_IsKinematic: 0
+  m_IsKinematic: 1
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0

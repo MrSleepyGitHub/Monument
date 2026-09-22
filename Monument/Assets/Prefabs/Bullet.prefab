@@ -195,51 +195,42 @@ TrailRenderer:
   m_PreviewTimeScale: 1
   m_Parameters:
     serializedVersion: 3
-    widthMultiplier: 1
+    widthMultiplier: 0.1
     widthCurve:
       serializedVersion: 2
       m_Curve:
       - serializedVersion: 3
         time: 0
         value: 0
-        inSlope: 1.2707083
-        outSlope: 1.2707083
+        inSlope: 2.414678
+        outSlope: 2.414678
         tangentMode: 0
         weightedMode: 0
         inWeight: 0.33333334
-        outWeight: 0.93226784
+        outWeight: 0.08477237
       - serializedVersion: 3
-        time: 0.089999996
-        value: 0.050013475
-        inSlope: 0
-        outSlope: 0
-        tangentMode: 0
-        weightedMode: 0
-        inWeight: 0.33333334
-        outWeight: 0.33333334
-      - serializedVersion: 3
-        time: 0.5
+        time: 0.88
         value: 0
-        inSlope: 0
-        outSlope: 0
+        inSlope: -0.0020668225
+        outSlope: -0.0020668225
         tangentMode: 0
         weightedMode: 0
-        inWeight: 0.23073578
-        outWeight: 0
+        inWeight: 0.89456564
+        outWeight: 0.33333334
       m_PreInfinity: 2
       m_PostInfinity: 2
       m_RotationOrder: 4
     colorGradient:
       serializedVersion: 2
       key0: {r: 1, g: 1, b: 1, a: 1}
-      key1: {r: 0, g: 0, b: 0, a: 1}
+      key1: {r: 1, g: 1, b: 1, a: 0}
       key2: {r: 0, g: 0, b: 0, a: 1}
       key3: {r: 0, g: 0, b: 0, a: 0}
       key4: {r: 0, g: 0, b: 0, a: 0}
       key5: {r: 0, g: 0, b: 0, a: 0}
       key6: {r: 0, g: 0, b: 0, a: 0}
       key7: {r: 0, g: 0, b: 0, a: 0}
-      ctime0: 20046
+      ctime0: 0
       ctime1: 65535
       ctime2: 0
       ctime3: 0
@@ -255,7 +246,7 @@ TrailRenderer:
       atime5: 0
       atime6: 0
       atime7: 0
-      m_Mode: 0
+      m_Mode: 2
       m_ColorSpace: 0
       m_NumColorKeys: 2
       m_NumAlphaKeys: 2
@@ -282,3 +273,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dadb6c3cdee8946428f1d2469514102d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Bullet
+  shooter: {fileID: 0}
+  impactEffectPrefab: {fileID: 3028778660153408563, guid: 421d2d3a43845684588e000d2d2fdcb4, type: 3}
+  ricochetSparksPrefab: {fileID: 3028778660153408563, guid: 2396131a3a59bb44590b7f085051f0a9, type: 3}
+  minRicochetAngle: 0
+  maxRicochetAngle: 2
+  maxRicochets: 2
+  ricochetSpeedRetention: 0.75
+  ricochetDamageMultiplier: 0.6
+  ricochetSound: {fileID: 0}
+  defaultDecalLifetime: 20
