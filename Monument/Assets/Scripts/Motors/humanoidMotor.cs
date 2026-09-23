@@ -641,6 +641,24 @@ public class humanoidMotor : MonoBehaviour, IDamageable
 		return false;
 	}
 
+	private void OnCollisionStay(Collision collision)
+	{
+		// If running directly into a dynamic object like a vehicle, do not force velocity into it
+		if (collision.rigidbody != null && !collision.rigidbody.isKinematic)
+		{
+			for (int i = 0; i < collision.contactCount; i++)
+			{
+				ContactPoint contact = collision.GetContact(i);
+				// If contact normal opposes current movement direction, zero out opposing velocity
+				float projection = Vector3.Dot(rb.linearVelocity, -contact.normal);
+				if (projection > 0f)
+				{
+					rb.linearVelocity -= -contact.normal * projection;
+				}
+			}
+		}
+	}
+
 	private void SetStance(PlayerStance newStance)
 	{
 		currentStance = newStance;

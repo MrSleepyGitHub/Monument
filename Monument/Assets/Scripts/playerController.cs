@@ -264,14 +264,16 @@ public class playerController : MonoBehaviour
 		if (currentMotor != null)
 		{
 			currentMotor.inVehicle = true;
-			currentMotor.SetCameraActive(false);
 
 			Rigidbody rb = currentMotor.GetComponent<Rigidbody>();
 			if (rb != null)
 			{
-				rb.linearVelocity = Vector3.zero;
-				rb.angularVelocity = Vector3.zero;
-				rb.isKinematic = true;
+				if (!rb.isKinematic)
+				{
+					rb.linearVelocity = Vector3.zero;
+					rb.angularVelocity = Vector3.zero;
+					rb.isKinematic = true;
+				}
 				rb.detectCollisions = false;
 			}
 
@@ -445,19 +447,21 @@ public class playerController : MonoBehaviour
 			if (hit.transform == currentMotor.transform || hit.transform.IsChildOf(currentMotor.transform))
 				return;
 
-			Vehicle vehicle = hit.collider.GetComponentInParent<Vehicle>();
-			if (vehicle != null && !vehicle.isOccupied)
-			{
-				_nextInteractAllowedTime = Time.time + pickupCooldown;
-				vehicle.EnterVehicle(this);
-				return;
-			}
-
+			// Prioritize explicit interaction components (doors, weapons, switches)
 			IInteractable interactable = hit.collider.GetComponentInParent<IInteractable>();
 			if (interactable != null)
 			{
 				_nextInteractAllowedTime = Time.time + pickupCooldown;
 				interactable.Interact(currentMotor.gameObject);
+				return;
+			}
+
+			// Fallback for raw vehicle hull collision without a specific door trigger
+			Vehicle vehicle = hit.collider.GetComponentInParent<Vehicle>();
+			if (vehicle != null)
+			{
+				_nextInteractAllowedTime = Time.time + pickupCooldown;
+				vehicle.BoardAnyAvailableSeat(currentMotor);
 			}
 		}
 	}
@@ -467,17 +471,92 @@ public class playerController : MonoBehaviour
 		if (activeVehicle == null) return;
 
 		float scroll = vehicleCameraZoomAction != null ? vehicleCameraZoomAction.ReadValue<float>() : 0f;
+		if (scroll == 0f && Mouse.current != null)
+		{
+			scroll = Mouse.current.scroll.ReadValue().y;
+		}
+
 		bool freeLook = vehicleFreeLookAction != null && vehicleFreeLookAction.IsPressed();
+
 		Vector2 mouseDelta = vehicleLookDeltaAction != null ? vehicleLookDeltaAction.ReadValue<Vector2>() : Vector2.zero;
+		if (mouseDelta == Vector2.zero && Mouse.current != null)
+		{
+			mouseDelta = Mouse.current.delta.ReadValue();
+		}
+
 		Vector2 joystickLook = vehicleLookAxisAction != null ? vehicleLookAxisAction.ReadValue<Vector2>() : Vector2.zero;
+		if (joystickLook == Vector2.zero && lookAxisAction != null)
+		{
+			joystickLook = lookAxisAction.ReadValue<Vector2>();
+		}
 
-		activeVehicle.SetCameraInputs(scroll, freeLook, mouseDelta, joystickLook);
+		if (ignoreNextDelta)
+		{
+			mouseDelta = Vector2.zero;
+			ignoreNextDelta = false;
+		}
 
-		if (vehicleToggleCameraAction != null && vehicleToggleCameraAction.triggered) activeVehicle.ToggleCamera();
-		if (interactAction != null && interactAction.triggered) { activeVehicle.ExitVehicle(); return; }
+		activeVehicle.SetCameraInputs(currentMotor, scroll, freeLook, mouseDelta, joystickLook);
 
-		if (activeVehicle is GroundVehicle groundVehicle) ProcessGroundVehicleInput(groundVehicle);
-		else if (activeVehicle is Aircraft aircraft) ProcessAircraftInput(aircraft);
+		if (vehicleToggleCameraAction != null && vehicleToggleCameraAction.triggered)
+		{
+			activeVehicle.ToggleCamera(currentMotor);
+		}
+
+		if (interactAction != null && interactAction.triggered)
+		{
+			activeVehicle.ExitOccupant(currentMotor);
+			return;
+		}
+
+		int seatIndex = activeVehicle.GetSeatIndex(currentMotor);
+
+		// Seat 0 drives; passenger seats process weapons
+		if (seatIndex == 0)
+		{
+			if (activeVehicle is GroundVehicle groundVehicle) ProcessGroundVehicleInput(groundVehicle);
+			else if (activeVehicle is Aircraft aircraft) ProcessAircraftInput(aircraft);
+
+			if (activeVehicle.CanSeatUseWeapons(0))
+			{
+				ProcessPassengerWeapons(0);
+			}
+		}
+		else
+		{
+			ProcessPassengerWeapons(seatIndex);
+		}
+	}
+
+	private void ProcessPassengerWeapons(int seatIndex)
+	{
+		if (currentMotor == null || currentMotor.isDead || currentMotor.currentHealth <= 0f) return;
+		if (activeVehicle == null || !activeVehicle.CanSeatUseWeapons(seatIndex)) return;
+
+		// 1. Aim Down Sights (Right-Click / Aim Action)
+		bool isAiming = false;
+		if (aimAction != null && aimAction.IsPressed())
+			isAiming = true;
+		else if (Mouse.current != null && Mouse.current.rightButton.isPressed)
+			isAiming = true;
+
+		currentMotor.SetAimInput(isAiming);
+
+		// 2. Weapon Trigger & Reload Processing
+		if (currentMotor.currentWeapon != null)
+		{
+			bool canFire = currentMotor.VisualController == null || currentMotor.VisualController.CanShoot;
+			bool fireHeld = canFire && (fireAction != null && fireAction.IsPressed());
+			bool fireTrig = canFire && (fireAction != null && fireAction.triggered);
+
+			currentMotor.currentWeapon.ProcessInput(fireHeld, fireTrig);
+
+			if (reloadAction != null && reloadAction.triggered && canFire)
+			{
+				currentMotor.currentWeapon.Reload();
+			}
+			// Dropping weapons inside the vehicle is intentionally locked out to prevent items clipping through chassis geometry
+		}
 	}
 
 	private void ProcessGroundVehicleInput(GroundVehicle gv)
@@ -527,7 +606,7 @@ public class playerController : MonoBehaviour
 	{
 		if (activeVehicle is GroundVehicle gv) gv.SetMotorInputs(0f, 0f, 0f, false);
 		if (activeVehicle is Aircraft ac) ac.SetFlightInputs(0f, 0f, 0f, 0f, 0f, 0f);
-		activeVehicle.SetCameraInputs(0f, false, Vector2.zero, Vector2.zero);
+		activeVehicle.SetCameraInputs(currentMotor, 0f, false, Vector2.zero, Vector2.zero);
 	}
 
 	private void CacheInputActions()

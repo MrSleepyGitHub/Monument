@@ -192,6 +192,8 @@ public class KeybindFramework : MonoBehaviour
 		{
 			UpdateDeviceConnection(device, true);
 		}
+
+		CleanUpStaleDuplicateDevices();
 	}
 
 	private void HandleDeviceChange(InputDevice device, InputDeviceChange change)
@@ -206,12 +208,30 @@ public class KeybindFramework : MonoBehaviour
 		}
 	}
 
+	/// <summary>
+	/// Filters non-gameplay HID interfaces and reconciles devices to prevent duplicate rows.
+	/// </summary>
 	private void UpdateDeviceConnection(InputDevice device, bool connected)
 	{
+		// 1. Filter out synthetic controls and secondary HID collections that have 0 controls
+		if (device == null || device.synthetic || device.allControls.Count == 0)
+			return;
+
+		// 2. Restrict to valid input device types
+		if (device is not (Keyboard or Mouse or Gamepad or Joystick))
+			return;
+
 		string identifier = GetDeviceIdentifier(device);
 		string hardwareName = string.IsNullOrEmpty(device.description.product) ? device.name : device.description.product;
 
-		var record = registeredDevices.Find(d => d.deviceIdentifier == identifier || d.runtimeDeviceId == device.deviceId);
+		// 3. Match against current runtime ID or device identifier
+		var record = registeredDevices.Find(d => d.runtimeDeviceId == device.deviceId || d.deviceIdentifier == identifier);
+
+		// 4. If connecting and not found, match against an existing disconnected record from a previous session
+		if (record == null && connected)
+		{
+			record = registeredDevices.Find(d => !d.isConnected && d.originalName == hardwareName && d.deviceIdentifier != "Keyboard" && d.deviceIdentifier != "Mouse");
+		}
 
 		if (record == null)
 		{
@@ -233,6 +253,29 @@ public class KeybindFramework : MonoBehaviour
 			record.runtimeDeviceId = connected ? device.deviceId : -1;
 			if (string.IsNullOrEmpty(record.originalName)) record.originalName = hardwareName;
 		}
+
+		SaveKnownDevices();
+	}
+
+	/// <summary>
+	/// Purges old session ghost duplicates loaded from PlayerPrefs that match active hardware.
+	/// </summary>
+	private void CleanUpStaleDuplicateDevices()
+	{
+		var connectedNames = new HashSet<string>();
+		foreach (var dev in registeredDevices)
+		{
+			if (dev.isConnected)
+			{
+				connectedNames.Add(dev.originalName);
+			}
+		}
+
+		registeredDevices.RemoveAll(d => !d.isConnected &&
+			d.deviceIdentifier != "Keyboard" &&
+			d.deviceIdentifier != "Mouse" &&
+			connectedNames.Contains(d.originalName) &&
+			d.displayName == d.originalName);
 
 		SaveKnownDevices();
 	}
@@ -399,14 +442,14 @@ public class KeybindFramework : MonoBehaviour
 
 	private IEnumerator ExecuteRebindRoutine(InputAction actionToBind, int slotIndex, Action onRebindComplete)
 	{
-		// 1. Wait until the mouse click that clicked the UI button has released
+		// 1. Wait until the mouse click that activated the UI button is released
 		yield return new WaitForSecondsRealtime(0.12f);
 		while (Mouse.current != null && Mouse.current.leftButton.isPressed)
 		{
 			yield return null;
 		}
 
-		// 2. Safely ensure slot allocation without throwing map-enabled exceptions
+		// 2. Ensure slot allocation without throwing map-enabled exceptions
 		if (slotIndex >= actionToBind.bindings.Count)
 		{
 			bool wasMapEnabled = movementMap != null && movementMap.enabled;
@@ -429,6 +472,10 @@ public class KeybindFramework : MonoBehaviour
 
 		var rebind = actionToBind.PerformInteractiveRebinding(slotIndex)
 			.WithCancelingThrough("<Keyboard>/escape")
+			// Exclude synthetic anyKey control so physical keys are bound directly
+			.WithControlsExcluding("<Keyboard>/anyKey")
+			.WithControlsExcluding("*/{anyKey}")
+			// Exclude mouse pointer noise from stealing the bind
 			.WithControlsExcluding("<Pointer>/position")
 			.WithControlsExcluding("<Pointer>/delta")
 			.WithMagnitudeHavingToBeGreaterThan(0.35f);
@@ -476,7 +523,6 @@ public class KeybindFramework : MonoBehaviour
 	{
 		if (action == null || slotIndex < 0 || slotIndex >= action.bindings.Count) return;
 
-		// Overrides slot with empty string rather than mutating collection structure
 		action.ApplyBindingOverride(slotIndex, string.Empty);
 		SaveBindingsToDisk();
 	}
@@ -524,5 +570,41 @@ public class KeybindFramework : MonoBehaviour
 
 		InitializeActions();
 		Debug.Log("[KeybindFramework] Cleared custom overrides and restored clean default bindings.");
+	}
+
+	[ContextMenu("Reset Saved Devices Only")]
+	public void ResetSavedDevices()
+	{
+		// 1. Wipe the persistent device list from PlayerPrefs
+		PlayerPrefs.DeleteKey(DEVICES_KEY);
+		PlayerPrefs.DeleteKey(BINDING_DEVICE_MAP_KEY);
+		bindingDeviceMap.Clear();
+		registeredDevices.Clear();
+
+		// 2. Re-register only currently connected hardware
+		RegisterExistingDevices();
+
+		Debug.Log("[KeybindFramework] Purged all saved devices from PlayerPrefs and rebuilt from currently connected hardware.");
+	}
+
+	[ContextMenu("Full Factory Reset (Bindings + Devices)")]
+	public void ResetAllKeybindData()
+	{
+		PlayerPrefs.DeleteKey(BINDINGS_KEY);
+		PlayerPrefs.DeleteKey(DEVICES_KEY);
+		PlayerPrefs.DeleteKey(BINDING_DEVICE_MAP_KEY);
+
+		bindingDeviceMap.Clear();
+		registeredDevices.Clear();
+
+		if (movementMap != null)
+		{
+			movementMap.RemoveAllBindingOverrides();
+		}
+
+		InitializeActions();
+		RegisterExistingDevices();
+
+		Debug.Log("[KeybindFramework] Complete factory reset: all custom bindings and known devices wiped.");
 	}
 }
