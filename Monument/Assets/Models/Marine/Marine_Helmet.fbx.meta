@@ -1,9 +1,34 @@
 fileFormatVersion: 2
-guid: 3541c1656ac938b43b127ee10d6fe541
+guid: 0b57d0aad9bd72540b6790c855cc08cc
 ModelImporter:
   serializedVersion: 24200
   internalIDToNameTable: []
-  externalObjects: {}
+  externalObjects:
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: M_Marine_Helmet
+    second: {fileID: 2100000, guid: 84f354cbdbdb675459ccdc644a06cbe6, type: 2}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Marine_Helmet_Albedo
+    second: {fileID: 2800000, guid: b5160b612c92618448293d282c5dfff7, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Marine_Helmet_Metallic
+    second: {fileID: 2800000, guid: b44c7c43f7b2f324997eca858bcd26a8, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Marine_Helmet_Normal
+    second: {fileID: 2800000, guid: e3ec30f5958aa9241b0f8f9e384badb0, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Marine_Helmet_Roughness
+    second: {fileID: 2800000, guid: d6064001fef68b443ad6b491b6f1bd1c, type: 3}
   materials:
     materialImportMode: 2
     materialName: 0
